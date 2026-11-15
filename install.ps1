@@ -32,5 +32,5 @@ Write-Host "Installed to $dest"
 
 if ($Launch) {
     Start-Process (Join-Path $dest "BasaltUI.exe")
-    Write-Host "Started. The tray icon is in the taskbar corner overflow — drag it out if you want it beside the clock."
+    Write-Host "Started. The tray icon is in the taskbar corner overflow - drag it out if you want it beside the clock."
 }

@@ -53,12 +53,12 @@ public static class UpdateInstaller
             if (exe is null)
             return "the zip does not contain a basalt.exe to run, so nothing was changed";
 
-            var (payload, target) = Map(exe, installRoot);
+            var (payload, target, exeRelative) = Map(exe, installRoot);
             if (payload is null || target is null)
                 return "the zip does not look like a basalt install, so nothing was changed";
 
             trace?.Invoke($"{payload} → {target}");
-            var error = await Task.Run(() => Swap(payload, target, trace), ct).ConfigureAwait(false);
+            var error = await Task.Run(() => Swap(payload, target, exeRelative, trace), ct).ConfigureAwait(false);
             if (error is null)
                 trace?.Invoke($"basalt {release.Tag.TrimStart('v')} is installed — start the server to run it");
             return error;
@@ -89,35 +89,42 @@ public static class UpdateInstaller
                     .FirstOrDefault();
 
     /// <summary>
-    /// Where the new files start inside the zip, and where they belong on this machine. A release that ships
-    /// a <c>bin</c> folder is meant to land on the basalt folder itself; one that ships a bare
-    /// <c>basalt.exe</c> is meant to land in <c>bin</c>.
+    /// Where the new files start inside the zip, where they belong on this machine, and where the
+    /// launcher ends up relative to the target. A release that ships a <c>bin</c> folder is meant to land
+    /// on the basalt folder itself; one that ships a bare <c>basalt.exe</c> is meant to land in <c>bin</c>.
     /// </summary>
-    private static (string? Payload, string? Target) Map(string extractedExe, string installRoot)
+    private static (string? Payload, string? Target, string ExeRelative) Map(string extractedExe, string installRoot)
     {
         var inside = Path.GetDirectoryName(extractedExe) ?? "";
         var bin = Path.Combine(installRoot, "bin");
         var targetBin = Directory.Exists(bin) ? bin : installRoot;
 
-        return string.Equals(Path.GetFileName(inside), "bin", StringComparison.OrdinalIgnoreCase)
-            ? (Path.GetDirectoryName(inside), installRoot)
-            : (inside, targetBin);
+        if (string.Equals(Path.GetFileName(inside), "bin", StringComparison.OrdinalIgnoreCase))
+        {
+            // When the exe the app knows about lives in a folder called bin — the usual layout, where
+            // BasaltExePath points at the exe itself — that folder is what the release's bin maps onto,
+            // so the release root goes one level above it, not onto bin again.
+            var root = IsBinLeaf(installRoot) ? Path.GetDirectoryName(installRoot) : installRoot;
+            return (Path.GetDirectoryName(inside), root ?? installRoot, Path.Combine("bin", "basalt.exe"));
+        }
+
+        return (inside, targetBin, "basalt.exe");
     }
 
+    private static bool IsBinLeaf(string path)
+        => string.Equals(Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
+                         "bin", StringComparison.OrdinalIgnoreCase);
+
     // ---- the part that changes something -----------------------------------------------------------------------
-    private static string? Swap(string payload, string target, Action<string>? trace)
+    private static string? Swap(string payload, string target, string exeRelative, Action<string>? trace)
     {
-        var inside = "bin";
-        var exe = Path.Combine(target, "bin", "basalt.exe");
-        if (!File.Exists(exe))
-        {
-            exe = Path.Combine(target, "basalt.exe");
-            inside = "";
-        }
+        // Where the launcher belongs follows from the mapping, not from what happens to exist: the exe
+        // path is known before any file moves, so the check afterwards is about the copy, not a guess.
+        var exe = Path.Combine(target, exeRelative);
 
         // The same engine under another name: leave it exactly where it is. Renaming it aside would keep a
         // copy of itself as the rollback and rewrite a hundred-odd megabytes for nothing.
-        var already = SameFile(exe, Path.Combine(payload, inside, "basalt.exe"));
+        var already = SameFile(exe, Path.Combine(payload, exeRelative));
 
         string? previous = null;
         if (File.Exists(exe) && !already)
@@ -138,9 +145,9 @@ public static class UpdateInstaller
         try
         {
             var files = CopyTree(payload, target, trace);
+            var kept = previous is not null ? "; the previous exe is kept as basalt.exe.previous" : "";
             trace?.Invoke($"{files} file{(files == 1 ? "" : "s")} laid in place" +
-                          (already ? "; the engine already here is the one this release carries"
-                                   : "; the previous exe is kept as basalt.exe.previous"));
+                          (already ? "; the engine already here is the one this release carries" : kept));
 
             // the launcher is the thing that has to be executable — if it is not there, undo what we did
             if (!File.Exists(exe))
