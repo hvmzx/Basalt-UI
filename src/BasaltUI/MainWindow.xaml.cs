@@ -231,9 +231,21 @@ public partial class MainWindow : Window
         }
         if (!Vm.IsConnected)
             return;
-        if (row.Detail.Contains("loaded", StringComparison.OrdinalIgnoreCase))
+        if (row.Loaded)
             return;
         _ = Vm.SwitchModelAsync(row.Id);
+    }
+
+    // ---- the version dot ---------------------------------------------------------------------------------------
+    private async void UpdateDot_Click(object sender, RoutedEventArgs e)
+    {
+        // Green: the click is a manual check. Yellow: the click is the update itself.
+        if (Vm.UpdateAvailable)
+        {
+            Update_Click(sender, e);
+            return;
+        }
+        await Vm.CheckForUpdateAsync(manual: true);
     }
 
     // ---- a newer basalt ----------------------------------------------------------------------------------------
@@ -299,21 +311,6 @@ public partial class MainWindow : Window
     }
 
     private void DismissUpdate_Click(object sender, RoutedEventArgs e) => Vm.UpdateDismiss();
-
-    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button button)
-            return;
-        button.IsEnabled = false;
-        try
-        {
-            await Vm.CheckForUpdateAsync(manual: true);
-        }
-        finally
-        {
-            button.IsEnabled = true;
-        }
-    }
 
     // ---- models on Hugging Face ---------------------------------------------------------------------------------
     private void BrowseModels_Click(object sender, RoutedEventArgs e) => Vm.OpenModelsBrowser();

@@ -177,13 +177,16 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>The line under the title: what is loaded and where.</summary>
+    /// <summary>The line beside the state pill — only when it says something the pill does not.</summary>
     public string StatusText
     {
         get
         {
             if (!status.Reachable)
-                return process.StateDetail;
+            {
+                var detail = process.StateDetail;
+                return detail.Equals(RunStateText, StringComparison.OrdinalIgnoreCase) ? "" : detail;
+            }
             var parts = new List<string>();
             if (!string.IsNullOrWhiteSpace(status.ModelName))
                 parts.Add(status.ModelName);
@@ -272,7 +275,6 @@ public sealed class MainViewModel : ObservableObject
     public string VramFreeText => machine.Video.Known
         ? BasaltLocator.HumanBytes(machine.Video.Free) + " VRAM free"
         : status.VramFreeMib > 0 ? BasaltLocator.HumanMib(status.VramFreeMib) + " VRAM free" : "—";
-    public string KvText => string.IsNullOrEmpty(status.Kv) ? "—" : "kv " + status.Kv;
     public string SpecText => status.Spec > 0 ? status.Spec + " draft tokens" : "no drafting";
     public string PcieText => status.PcieFrac > 0 ? "pcie " + status.PcieFrac.ToString("0.00") : "pcie idle";
     public string DiskText => status.DiskReadMb > 0.05 ? status.DiskReadMb.ToString("0.0") + " MB/s from disk" : "no reads";
@@ -333,7 +335,7 @@ public sealed class MainViewModel : ObservableObject
         nameof(GpuMemFraction), nameof(GpuMemText), nameof(GpuTempFraction), nameof(GpuTempHot), nameof(GpuTempValue),
         nameof(GpuPowerFraction), nameof(GpuPowerText), nameof(CpuFraction), nameof(CpuText),
         nameof(RamFraction), nameof(RamText), nameof(ExpertFraction), nameof(ExpertText), nameof(VramFreeText),
-        nameof(KvText), nameof(SpecText), nameof(PcieText), nameof(DiskText), nameof(QueueText), nameof(LiveText),
+        nameof(SpecText), nameof(PcieText), nameof(DiskText), nameof(QueueText), nameof(LiveText),
         nameof(EngineLine), nameof(HardwareLine), nameof(UptimeText),
     ];
 
@@ -349,17 +351,6 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<HomeModelRow> DisplayModels { get; } = [];
     public ObservableCollection<string> Warnings { get; } = [];
 
-    public string Address
-    {
-        get
-        {
-            var cfg = getConfig();
-            return cfg is null ? "open Settings to point at a config file" : client.BaseUrl;
-        }
-    }
-
-    public string ConfigPathText => Settings.ConfigPath;
-    public string ExePathText => Settings.BasaltExePath;
     public string VersionText => string.IsNullOrWhiteSpace(status.EngineVersion) ? "" : "basalt " + status.EngineVersion;
 
     // ---- is this basalt behind? ------------------------------------------------------------------------------
@@ -450,6 +441,31 @@ public sealed class MainViewModel : ObservableObject
         => Latest is { } release && Settings.DismissedUpdateTag != release.Tag &&
            UpdateChecker.Compare(InstalledVersionText, release) > 0;
 
+    /// <summary>
+    /// The bottom-left corner: which basalt this machine runs, green dot when that is the newest release,
+    /// yellow when something newer is out — and the whole thing is the update button.
+    /// </summary>
+    public string EngineVersionLabel
+    {
+        get
+        {
+            var here = InstalledVersionText;
+            return here.Length == 0 ? "basalt — version unknown" : "basalt " + here;
+        }
+    }
+
+    public string UpdateDotTip
+    {
+        get
+        {
+            if (checkingUpdate)
+                return "looking for a newer basalt…";
+            if (Latest is { } release && UpdateChecker.Compare(InstalledVersionText, release) > 0)
+                return $"basalt {release.Tag} is out — click to install it";
+            return "click to check for a newer basalt";
+        }
+    }
+
     /// <summary>The banner. Nothing when there is nothing to say.</summary>
     public string UpdateText
     {
@@ -539,7 +555,8 @@ public sealed class MainViewModel : ObservableObject
 
     private void RaiseUpdate()
         => RaiseAll(nameof(UpdateAvailable), nameof(UpdateSaysAnything), nameof(UpdateText),
-                    nameof(UpdateAssetText), nameof(InstalledVersionText));
+                    nameof(UpdateAssetText), nameof(InstalledVersionText),
+                    nameof(EngineVersionLabel), nameof(UpdateDotTip));
 
     /// <summary>
     /// Ask GitHub. Quiet calls only say something when they found a release this machine does not have; an
@@ -865,7 +882,6 @@ public sealed class MainViewModel : ObservableObject
         poller.Configure(port, host, string.IsNullOrWhiteSpace(Settings.ApiKey) ? null : Settings.ApiKey,
                          readServerLog: !process.StartedByUs);
         process.ServePort = port;                                  // how a stop finds the server's own processes
-        Raise(nameof(Address));
         Raise(nameof(Url));
     }
 
@@ -1103,6 +1119,7 @@ public sealed class MainViewModel : ObservableObject
         RaiseDisplay();
         Raise(nameof(StatusText));
         Raise(nameof(VersionText));
+        Raise(nameof(EngineVersionLabel));
 
         // the engine naming itself is the moment the update banner can say something new, and the moment
         // there is something worth remembering about the file on disk
@@ -1156,7 +1173,8 @@ public sealed class MainViewModel : ObservableObject
         var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var m in status.Models)
         {
-            rows.Add(new HomeModelRow(m.Id, m.Detail, Live: true));
+            rows.Add(new HomeModelRow(m.Id, m.Detail, Live: true,
+                                      Loaded: m.Status.Contains("loaded", StringComparison.OrdinalIgnoreCase)));
             known.Add(m.Id);
             known.Add(Stem(m.Id));
         }
@@ -1264,6 +1282,14 @@ public sealed class MainViewModel : ObservableObject
 
         if (list.Count == Warnings.Count && list.SequenceEqual(Warnings))
             return;
+
+        // The card is gone; the console is where these live now. Each line is said once — when it first
+        // appears — and again only if it went away and came back.
+        var before = Warnings.ToHashSet(StringComparer.Ordinal);
+        foreach (var w in list)
+            if (!before.Contains(w))
+                Append("warning: " + w, LogSource.App);
+
         Warnings.Clear();
         foreach (var w in list)
             Warnings.Add(w);
@@ -1288,7 +1314,7 @@ public sealed class MainViewModel : ObservableObject
 }
 
 /// <summary>One row of the Models card: a model the server serves, or a file in the models folder.</summary>
-public sealed record HomeModelRow(string Id, string Detail, bool Live);
+public sealed record HomeModelRow(string Id, string Detail, bool Live, bool Loaded = false);
 
 /// <summary>A model file sitting in the models folder, as the folder itself reports it.</summary>
 public sealed record LocalModelRow(string File, long Bytes, DateTime Changed)
