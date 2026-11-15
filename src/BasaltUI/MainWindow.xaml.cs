@@ -222,11 +222,16 @@ public partial class MainWindow : Window
     {
         // A switch is an HTTP call to a server that has to be answering; with none there is nothing to
         // tell, and the button beside this list is already showing that.
+        if (ModelsList.SelectedItem is not HomeModelRow row)
+            return;
+        if (!row.Live)
+        {
+            Vm.OpenLocalModel(row.Id);       // a folder file the engine does not serve: say what it needs
+            return;
+        }
         if (!Vm.IsConnected)
             return;
-        if (ModelsList.SelectedItem is not ModelRow row)
-            return;
-        if (row.Status.Contains("loaded", StringComparison.OrdinalIgnoreCase))
+        if (row.Detail.Contains("loaded", StringComparison.OrdinalIgnoreCase))
             return;
         _ = Vm.SwitchModelAsync(row.Id);
     }

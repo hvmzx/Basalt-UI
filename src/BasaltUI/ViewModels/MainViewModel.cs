@@ -83,6 +83,8 @@ public sealed class MainViewModel : ObservableObject
         process.StateChanged += OnProcessState;
         poller.StatusChanged += OnStatus;      // thread-pool: the handlers check the dispatcher
 
+        MaybeRescanLocalModels(force: true);   // the Models card has something to show before the first beat
+
         StartCommand = new RelayCommand(async () => await StartAsync(), () => !process.IsAlive, "Start");
         StopCommand = new RelayCommand(async () => await StopAsync(), () => process.IsAlive, "Stop");
         RestartCommand = new RelayCommand(async () => await RestartAsync(), () => process.IsAlive, "Restart");
@@ -135,15 +137,15 @@ public sealed class MainViewModel : ObservableObject
     public bool IsRunning => process.IsAlive;
 
     /// <summary>
-    /// What the Models card says when its list is empty. The list only ever carries the models a running
-    /// server is actually serving, so the same "nothing here" line means two different things: with the
-    /// engine stopped it is not the folder that is empty — it is the server that is not answering.
+    /// What the Models card says when its list is empty. The list carries the models a running server
+    /// serves, plus the files in the models folder, so an empty list really does mean there is nothing
+    /// to show: no server output and an empty folder.
     /// </summary>
     public string ModelsEmptyText => status.Reachable
-        ? "no models in that folder yet — Find models online… to fetch one"
+        ? "no models here yet — Discover more… to fetch one"
         : process.IsAlive
             ? "waiting for the server — the models it serves show up here once it answers"
-            : "basalt is stopped — start it and the models it would serve show up here";
+            : "the models folder is empty — Discover more… to fetch one";
 
     /// <summary>One short word for the header pill.</summary>
     public string PrimaryClass => status.Reachable
@@ -342,6 +344,9 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<RequestRow> Recent { get; } = [];
     public ObservableCollection<ModelRow> ModelRows { get; } = [];
+
+    /// <summary>What the Models card lists: served models first, then the models folder's files.</summary>
+    public ObservableCollection<HomeModelRow> DisplayModels { get; } = [];
     public ObservableCollection<string> Warnings { get; } = [];
 
     public string Address
@@ -1056,6 +1061,24 @@ public sealed class MainViewModel : ObservableObject
         await ControlAsync("/v1/load", body, "switch to " + name);
     }
 
+    /// <summary>
+    /// A file clicked in the Models card that the engine does not serve: the file is in the folder, but a
+    /// model entry in the config still has to point at it before the engine can load it. If the server is
+    /// answering, the switch is tried anyway — the engine's answer lands in the log either way.
+    /// </summary>
+    public void OpenLocalModel(string file)
+    {
+        if (status.Reachable)
+        {
+            _ = SwitchModelAsync(file);
+            return;
+        }
+        Append($"model: {file} is in the models folder — Settings → Models can point a model at the file, " +
+               "and basalt has to be running to load it", LogSource.App);
+        Notice?.Invoke($"{file} needs a model entry — open Settings → Models");
+        SettingsOpened?.Invoke();
+    }
+
     // ---- plumbing ---------------------------------------------------------------------------------------
     private void OnProcessState(RunState state, string detail) => OnUi(() =>
     {
@@ -1112,17 +1135,103 @@ public sealed class MainViewModel : ObservableObject
             Recent.Add(row);
     }
 
-    private string lastModelIds = "";
-
     private void RebuildModels(ServerStatus snapshot)
     {
-        var ids = string.Join("|", snapshot.Models.Select(m => m.Id + ":" + m.Status + ":" + m.Asleep));
-        if (ids == lastModelIds)
-            return;
-        lastModelIds = ids;
+        MaybeRescanLocalModels();
+
         ModelRows.Clear();
         foreach (var m in snapshot.Models)
             ModelRows.Add(m);
+        RebuildDisplay();
+    }
+
+    /// <summary>
+    /// What the card shows is one honest list: the models a running server serves, then the files
+    /// sitting in the models folder that the server is not serving (they still need a config entry
+    /// before the engine can load them, which is what a click on one of them says).
+    /// </summary>
+    private void RebuildDisplay()
+    {
+        var rows = new List<HomeModelRow>();
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in status.Models)
+        {
+            rows.Add(new HomeModelRow(m.Id, m.Detail, Live: true));
+            known.Add(m.Id);
+            known.Add(Stem(m.Id));
+        }
+        foreach (var f in localModels)
+        {
+            if (known.Contains(f.Name) || known.Contains(Stem(f.Name)))
+                continue;
+            rows.Add(new HomeModelRow(f.Name, f.Detail + " · in the models folder", Live: false));
+        }
+
+        var ids = string.Join("|", rows.Select(r => r.Id + ":" + r.Detail));
+        if (ids == lastDisplayIds)
+            return;
+        lastDisplayIds = ids;
+        DisplayModels.Clear();
+        foreach (var r in rows)
+            DisplayModels.Add(r);
+        Raise(nameof(ModelsEmptyText));
+    }
+
+    /// <summary>A name without its model-file extension, so a served id and a folder file can be matched.</summary>
+    private static string Stem(string name)
+    {
+        foreach (var ext in new[] { ".basalt", ".gguf" })
+            if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+                return name[..^ext.Length];
+        return name;
+    }
+
+    // ---- the models folder --------------------------------------------------------------------------------------
+    private List<LocalModelRow> localModels = [];
+    private DateTime lastLocalScan;
+    private string lastDisplayIds = "";
+
+    public IReadOnlyList<LocalModelRow> LocalModelRows => localModels;
+
+    /// <summary>
+    /// What the models folder holds, scanned rarely (at most every few seconds, and only when a status
+    /// beat arrives) so a folder on a slow disk cannot make the panel stutter. A folder that cannot be
+    /// read reads as empty, which the empty line in the card is honest about.
+    /// </summary>
+    private void MaybeRescanLocalModels(bool force = false)
+    {
+        var now = DateTime.UtcNow;
+        if (!force && now - lastLocalScan < TimeSpan.FromSeconds(5))
+            return;
+        lastLocalScan = now;
+
+        var found = new List<LocalModelRow>();
+        try
+        {
+            var folder = Settings.ModelsFolder;
+            if (folder.Length > 0 && Directory.Exists(folder))
+                foreach (var file in Directory.EnumerateFiles(folder))
+                {
+                    var ext = Path.GetExtension(file);
+                    if (!ext.Equals(".basalt", StringComparison.OrdinalIgnoreCase) &&
+                        !ext.Equals(".gguf", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    var info = new FileInfo(file);
+                    found.Add(new LocalModelRow(file, info.Length, info.LastWriteTimeUtc));
+                }
+        }
+        catch
+        {
+            // an unreadable folder is an empty one; the card already says what it can
+        }
+
+        found.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        if (found.Count == localModels.Count &&
+            found.Zip(localModels).All(p => p.First.File == p.Second.File && p.First.Bytes == p.Second.Bytes))
+            return;
+        localModels = found;
+        lastDisplayIds = "";          // the merged list has to be rebuilt, not just compared
+        RebuildDisplay();
     }
 
     private void RebuildWarnings(ServerStatus snapshot)
@@ -1176,4 +1285,15 @@ public sealed class MainViewModel : ObservableObject
         else
             dispatcher.BeginInvoke(action);
     }
+}
+
+/// <summary>One row of the Models card: a model the server serves, or a file in the models folder.</summary>
+public sealed record HomeModelRow(string Id, string Detail, bool Live);
+
+/// <summary>A model file sitting in the models folder, as the folder itself reports it.</summary>
+public sealed record LocalModelRow(string File, long Bytes, DateTime Changed)
+{
+    public string Name => Path.GetFileName(File);
+    public string Detail => (Bytes > 0 ? BasaltLocator.HumanBytes(Bytes) : "size unknown") +
+                            (Changed == default ? "" : " · " + Changed.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
 }

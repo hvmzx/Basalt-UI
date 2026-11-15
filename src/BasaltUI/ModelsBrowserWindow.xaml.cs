@@ -36,23 +36,43 @@ public partial class ModelsBrowserWindow : Window
 
     private AppSettings Settings => app.Settings;
 
-    /// <summary>The packs basalt's author publishes, pinned to the top of every list with a badge.</summary>
-    private static readonly string[] OfficialRepos =
-    [
-        "jesdga/Qwen3.8-Flash-Next-Basalt",
-        "jesdga/DeepSeek-V4.1-Flash-1017-Basalt",
-    ];
+    /// <summary>
+    /// The packs the basalt author publishes are pinned to the top with a badge, and the list of them is
+    /// asked for fresh every time the window opens — a pack the author drops tomorrow shows up without
+    /// this app being updated. Only things that look like basalt packs are pinned; the author's other
+    /// repos stay out of the way unless a search finds them.
+    /// </summary>
+    private const string OfficialOwner = "jesdga";
+
+    private IReadOnlyList<RepoRow>? officialCache;
+
+    private static bool IsBasaltPack(HfRepo repo)
+        => repo.Id.Contains("basalt", StringComparison.OrdinalIgnoreCase) ||
+           repo.Tags.Any(t => t.Contains("basalt", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The official packs, remembered for this window once the ask has succeeded once.</summary>
+    private async Task<(IReadOnlyList<RepoRow> Rows, string? Error)> OfficialAsync()
+    {
+        if (officialCache is { } cached)
+            return (cached, null);
+        try
+        {
+            var found = await HuggingFace.AuthorAsync(Settings.HfMirror, OfficialOwner, CancellationToken.None).ConfigureAwait(true);
+            var rows = found.Where(IsBasaltPack).Select(r => new RepoRow(r, official: true)).ToList();
+            officialCache = rows;
+            return (rows, null);
+        }
+        catch (Exception e)
+        {
+            return ([], Net.Explain(e));
+        }
+    }
 
     /// <summary>Official packs first, then whatever the search returned, minus duplicates.</summary>
-    private static List<RepoRow> WithOfficial(IReadOnlyList<HfRepo>? found)
+    private static List<RepoRow> Merge(IReadOnlyList<RepoRow> officials, IReadOnlyList<HfRepo>? found)
     {
-        var rows = new List<RepoRow>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var id in OfficialRepos)
-        {
-            rows.Add(new RepoRow(new HfRepo(id, 0, 0, null, false, []), official: true));
-            seen.Add(id);
-        }
+        var rows = new List<RepoRow>(officials);
+        var seen = officials.Select(r => r.Repo.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (found is not null)
             foreach (var repo in found)
                 if (seen.Add(repo.Id))
@@ -77,22 +97,29 @@ public partial class ModelsBrowserWindow : Window
         FilesList.ItemsSource = null;
         ClearRepo();
 
+        var (officials, officialError) = await OfficialAsync();
         try
         {
             var rows = await HuggingFace.SearchAsync(Settings.HfMirror, QueryBox.Text, 50, CancellationToken.None);
-            ReposList.ItemsSource = WithOfficial(rows);
+            ReposList.ItemsSource = Merge(officials, rows);
+            var packs = officials.Count == 1 ? "1 official pack" : $"{officials.Count} official packs";
             SearchFoot.Text = rows.Count switch
             {
-                0 => "nothing came back for that — the official packs are pinned above",
-                var n => $"{n} repos, most downloaded first · official packs pinned above" +
+                0 when officials.Count > 0 => $"nothing came back for that — {packs} pinned above",
+                0 => "nothing came back for that",
+                var n => $"{n} repos, most downloaded first · {packs} pinned above" +
                          (HuggingFace.Token is null ? "" : " · using the token in HF_TOKEN"),
             };
+            if (officialError is not null)
+                SearchFoot.Text += " · the official packs could not be listed: " + officialError;
         }
         catch (Exception e)
         {
-            // the search failing is not the officials' fault: they are still listed, ready to open
-            ReposList.ItemsSource = WithOfficial(null);
-            SearchFoot.Text = Net.Explain(e) + " — the official packs are still listed; press Search to try again";
+            // a search failing is not the officials' fault: whatever was pinned is still listed
+            ReposList.ItemsSource = Merge(officials, null);
+            SearchFoot.Text = Net.Explain(e) +
+                              (officials.Count > 0 ? " — the official packs are still listed; press Search to try again"
+                                                   : " — press Search to try again");
         }
         finally
         {

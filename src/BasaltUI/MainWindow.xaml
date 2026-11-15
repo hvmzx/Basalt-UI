@@ -330,7 +330,7 @@
                                 <TextBlock DockPanel.Dock="Right" Text="double-click to load" Style="{StaticResource Label}" />
                             </DockPanel>
                             <Grid Margin="0,10,0,0" Height="172">
-                                <ListBox x:Name="ModelsList" ItemsSource="{Binding ModelRows}"
+                                <ListBox x:Name="ModelsList" ItemsSource="{Binding DisplayModels}"
                                          MouseDoubleClick="ModelDouble_Click">
                                     <ListBox.ItemTemplate>
                                         <DataTemplate>
@@ -361,7 +361,8 @@
                                         IsEnabled="{Binding IsConnected}"
                                         Margin="8,0,0,0" MinWidth="70"
                                         ToolTip="Switch the server to the selected model" />
-                                <Button DockPanel.Dock="Left" Content="Find models online…" Click="BrowseModels_Click" />
+                                <Button DockPanel.Dock="Left" Content="Discover more…" Click="BrowseModels_Click"
+                                        ToolTip="Every model on Hugging Face — the packs the basalt author publishes are pinned at the top" />
                             </DockPanel>
                             <TextBlock Text="{Binding ModelsFolderText}" Style="{StaticResource Label}"
                                        Foreground="{DynamicResource TextFaint}" Margin="0,10,0,0"

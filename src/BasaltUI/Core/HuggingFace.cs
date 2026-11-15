@@ -91,22 +91,50 @@ public static class HuggingFace
         var rows = new List<HfRepo>();
         foreach (var item in (await GetAsync(url, ct).ConfigureAwait(false)).Arr())
         {
-            var id = item.Get("id").S();
-            if (id.Length == 0)
-                continue;
-
-            var stamps = StampNames.Select(n => item.Get(n).SR())
-                                                              .Select(s => s is not null && DateTime.TryParse(s, out var dt) ? dt : (DateTime?)null);
-            rows.Add(new HfRepo(
-                Id: id,
-                Downloads: item.Get("downloads").L(),
-                Likes: item.Get("likes").I(),
-                Updated: stamps.FirstOrDefault(d => d is not null),
-                Private: item.Get("private").B(),
-                Tags: item.Get("tags").Arr().Select(e => e.S()).Where(t => t.Length > 0).ToArray()));
+            var repo = RepoOf(item);
+            if (repo is not null)
+                rows.Add(repo);
         }
 
         return rows;
+    }
+
+    /// <summary>
+    /// Every model one author publishes, newest first. This is how the browser's pinned section learns
+    /// about a pack the basalt author has just dropped, with no update to this app in between.
+    /// </summary>
+    public static async Task<IReadOnlyList<HfRepo>> AuthorAsync(string? mirror, string author, CancellationToken ct)
+    {
+        var url = $"{Base(mirror)}/api/models?author={Uri.EscapeDataString(author)}" +
+                  $"&sort=lastModified&direction=-1&full=true&limit=100";
+
+        var rows = new List<HfRepo>();
+        foreach (var item in (await GetAsync(url, ct).ConfigureAwait(false)).Arr())
+        {
+            var repo = RepoOf(item);
+            if (repo is not null)
+                rows.Add(repo);
+        }
+
+        return rows;
+    }
+
+    /// <summary>One entry of the models listing, flattened. Null when it does not even name itself.</summary>
+    private static HfRepo? RepoOf(JsonElement item)
+    {
+        var id = item.Get("id").S();
+        if (id.Length == 0)
+            return null;
+
+        var stamps = StampNames.Select(n => item.Get(n).SR())
+                               .Select(s => s is not null && DateTime.TryParse(s, out var dt) ? dt : (DateTime?)null);
+        return new HfRepo(
+            Id: id,
+            Downloads: item.Get("downloads").L(),
+            Likes: item.Get("likes").I(),
+            Updated: stamps.FirstOrDefault(d => d is not null),
+            Private: item.Get("private").B(),
+            Tags: item.Get("tags").Arr().Select(e => e.S()).Where(t => t.Length > 0).ToArray());
     }
 
     /// <summary>
