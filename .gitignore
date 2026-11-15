@@ -1,0 +1,18 @@
+# Compiled output. Never worth a diff, and the live tray copy locks these anyway.
+bin/
+obj/
+
+# Working scratch: the verification and mirror scripts, the screenshots they render, and the
+# altbin-/altshots-/altprobe- outdirs every build goes into while the tray app holds the real exe.
+.scratch/
+
+# dotnet's own state, pointed here when the app home has to be redirected.
+.dotnet-home/
+
+# WPF's temporary project, left behind when a build is interrupted against a locked BasaltUI.exe.
+*_wpftmp.csproj
+
+# Editor and per-user noise.
+.vs/
+*.user
+*.suo

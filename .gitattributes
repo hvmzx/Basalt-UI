@@ -1,0 +1,5 @@
+# The repository stores LF. A checkout keeps LF too, so an editor that saves a file as CRLF still
+# produces a clean diff instead of a whole-file rewrite, and a clone on this machine matches the
+# files that are already here. Switch to `eol=crlf` if Windows-native line endings in the working
+# tree matter more to you than that.
+* text=auto eol=lf

@@ -1,0 +1,1179 @@
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.CompilerServices;
+using System.Windows;
+using System.Windows.Input;
+using BasaltUI.Core;
+
+namespace BasaltUI.ViewModels;
+
+public abstract class ObservableObject : INotifyPropertyChanged
+{
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value))
+            return false;
+        field = value;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        return true;
+    }
+
+    protected void Raise([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    /// <summary>One reading usually moves twenty read-outs; raising them together keeps the UI honest.</summary>
+    protected void RaiseAll(params string[] names)
+    {
+        var handler = PropertyChanged;
+        if (handler is null)
+            return;
+        foreach (var name in names)
+            handler(this, new PropertyChangedEventArgs(name));
+    }
+}
+
+public sealed record LogLine(DateTime At, string Text, LogSource Source)
+{
+    public string Time => At.ToString("HH:mm:ss");
+}
+
+public enum LogSource { Server, App, Error }
+
+/// <summary>
+/// Everything the window shows and can do. The controller side (process, polling, config) is handed in, so the
+/// tray and the window act on the same state.
+/// </summary>
+public sealed class MainViewModel : ObservableObject
+{
+    private readonly BasaltProcess process;
+    private readonly BasaltClient client;
+    private readonly StatusPoller poller;
+    private readonly Func<ConfigDocument?> getConfig;
+    private readonly Action reopenConfig;
+    private readonly Action<string> trace;
+
+    private ServerStatus status = ServerStatus.Down("");
+
+    /// <summary>
+    /// RAM and GPU memory as Windows measures them, refreshed with every beat — the same figures Task Manager
+    /// shows, and available whether or not a server is answering. The engine's own memory numbers stay in the
+    /// stats it reports; the machine rows on this window are the machine's.
+    /// </summary>
+    private MachineMemory.Sample machine = MachineMemory.Read();
+
+    private string logFilter = "";
+
+    public AppSettings Settings { get; }
+
+    public MainViewModel(AppSettings settings, BasaltProcess process, BasaltClient client, StatusPoller poller,
+                         Func<ConfigDocument?> getConfig, Action reopenConfig, Action<string> trace)
+    {
+        Settings = settings;
+        this.process = process;
+        this.client = client;
+        this.poller = poller;
+        this.getConfig = getConfig;
+        this.reopenConfig = reopenConfig;
+        this.trace = trace;
+
+        process.StateChanged += OnProcessState;
+        poller.StatusChanged += OnStatus;      // thread-pool: the handlers check the dispatcher
+
+        StartCommand = new RelayCommand(async () => await StartAsync(), () => !process.IsAlive, "Start");
+        StopCommand = new RelayCommand(async () => await StopAsync(), () => process.IsAlive, "Stop");
+        RestartCommand = new RelayCommand(async () => await RestartAsync(), () => process.IsAlive, "Restart");
+        LoadCommand = new RelayCommand(async () => await ControlAsync("/load", null, "load"), () => status.Reachable && !status.Loaded, "Load");
+        UnloadCommand = new RelayCommand(async () => await ControlAsync("/unload", null, "unload"), () => status.Reachable && status.Loaded, "Unload");
+        OpenWebUiCommand = new RelayCommand(() => OpenWebUi(), () => status.Reachable, "web ui");
+        OpenApiCommand = new RelayCommand(() => OpenApi(), () => status.Reachable, "json");
+        SettingsCommand = new RelayCommand(() => SettingsOpened?.Invoke(), name: "settings");
+        ReloadConfigCommand = new RelayCommand(() =>
+        {
+            reopenConfig();
+            ReapplyPolling();
+        }, name: "reload config");
+    }
+
+    // ---- commands ---------------------------------------------------------------------------------------
+    public ICommand StartCommand { get; }
+    public ICommand StopCommand { get; }
+    public ICommand RestartCommand { get; }
+    public ICommand LoadCommand { get; }
+    public ICommand UnloadCommand { get; }
+    public ICommand OpenWebUiCommand { get; }
+    public ICommand OpenApiCommand { get; }
+    public ICommand SettingsCommand { get; }
+    public ICommand ReloadConfigCommand { get; }
+
+    public event Action? SettingsOpened;
+    public event Action<string>? Notice;
+
+    // ---- the screen ---------------------------------------------------------------------------------------
+    public ServerStatus Status
+    {
+        get => status;
+        private set
+        {
+            if (!Set(ref status, value))
+                return;
+            Raise(nameof(RunStateText));
+            Raise(nameof(StatusText));
+            Raise(nameof(StatusClasses));
+            Raise(nameof(PrimaryClass));
+            Raise(nameof(ModelsEmptyText));
+            Raise(nameof(IsConnected));       // anything bound to it follows the same beat
+            foreach (var cmd in new ICommand[] { StopCommand, RestartCommand, LoadCommand, UnloadCommand, OpenWebUiCommand, OpenApiCommand })
+                (cmd as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+    }
+
+    public bool IsConnected => status.Reachable;
+    public bool IsRunning => process.IsAlive;
+
+    /// <summary>
+    /// What the Models card says when its list is empty. The list only ever carries the models a running
+    /// server is actually serving, so the same "nothing here" line means two different things: with the
+    /// engine stopped it is not the folder that is empty — it is the server that is not answering.
+    /// </summary>
+    public string ModelsEmptyText => status.Reachable
+        ? "no models in that folder yet — Find models online… to fetch one"
+        : process.IsAlive
+            ? "waiting for the server — the models it serves show up here once it answers"
+            : "basalt is stopped — start it and the models it would serve show up here";
+
+    /// <summary>One short word for the header pill.</summary>
+    public string PrimaryClass => status.Reachable
+        ? status.Loading ? "loading"
+        : status.Busy ? "busy"
+        : status.Loaded ? "ready"
+        : "idle"
+        : process.IsAlive ? "starting" : "stopped";
+
+    public string RunStateText
+    {
+        get
+        {
+            if (!status.Reachable)
+                return process.State switch
+                {
+                    RunState.Starting => "starting",
+                    RunState.Stopping => "stopping",
+                    RunState.Failed => "failed",
+                    _ => "stopped",
+                };
+            if (status.Swap is not null)
+                return "swapping";
+            if (status.Loading)
+                return status.LoadPercent is { } p ? $"loading {p:0}%" : "loading";
+            if (status.Busy)
+                return "generating";
+            return status.Loaded ? "ready" : "idle";
+        }
+    }
+
+    /// <summary>The line under the title: what is loaded and where.</summary>
+    public string StatusText
+    {
+        get
+        {
+            if (!status.Reachable)
+                return process.StateDetail;
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(status.ModelName))
+                parts.Add(status.ModelName);
+            if (status.Models.Count > 1)
+                parts.Add(status.Models.Count + " models");
+            if (status.Loaded && status.SlotsTotal > 0)
+                parts.Add(status.SlotsActive + "/" + status.SlotsTotal + " slots" + (status.Queued > 0 ? $" · {status.Queued} waiting" : ""));
+            return string.Join("  ·  ", parts);
+        }
+    }
+
+    public string[] StatusClasses
+    {
+        get
+        {
+            var list = new List<string> { PrimaryClass };
+            if (!string.IsNullOrEmpty(status.Spill))
+                list.Add("spill");
+            if (status.Gpus.FirstOrDefault() is { } gpu && gpu.Temp >= 80)
+                list.Add("hot");
+            return [.. list];
+        }
+    }
+
+    // charts: what the window draws from
+    public double[] DecodeSeries => status.TokSHistory;
+    public double[] PrefillSeries => status.PrefillHistory;
+    public double[] GpuUtilSeries => status.GpuUtilHistory;
+    public double[] GpuPowerSeries => status.GpuPowerHistory;
+    public double[] GpuTempSeries => status.GpuTempHistory;
+    public string Url => client.BaseUrl;
+
+    // gauges and one-line read-outs; the window binds these instead of doing arithmetic in XAML
+    private GpuRow? Gpu => status.Gpus.Count > 0 ? status.Gpus[0] : null;
+
+    public string DecodeValue => status.TokS is { } t ? t.ToString("0.0") + " tok/s" : "—";
+    public string PrefillValue => status.PrefillTokS is { } p ? p.ToString("0") + " tok/s" : "—";
+    public string GpuNameText => Gpu?.Name is { Length: > 0 } name ? name
+                               : machine.Video.Name is { Length: > 0 } card ? card
+                               : "no gpu reported";
+    public double GpuUtilFraction => Math.Clamp((Gpu?.Util ?? 0) / 100.0, 0, 1);
+    public string GpuUtilValue => Gpu is { } g ? g.Util.ToString("0") + " %" : "—";
+    // The card's memory in Windows' words: what the card carries (DXGI) and what fills it (the performance
+    // counter Task Manager's GPU page samples). nvidia-smi's total counts the driver's own carve-out on top,
+    // so it never matched that page; the engine's NVML pair is used only when neither OS half could answer,
+    // and the chip then reads from that source instead.
+    private (long Used, long Total) VramNow => machine.Video.Known
+        ? (machine.Video.InUse, machine.Video.Total)
+        : Gpu is { MemTotal: > 0 } g ? (g.MemUsed, g.MemTotal) : (0, 0);
+
+    public double GpuMemFraction { get { var v = VramNow; return v.Total > 0 ? Math.Clamp((double)v.Used / v.Total, 0, 1) : 0; } }
+    public string GpuMemText
+    {
+        get
+        {
+            var v = VramNow;
+            return v.Total > 0 ? BasaltLocator.HumanBytes(v.Used) + " / " + BasaltLocator.HumanBytes(v.Total) : "—";
+        }
+    }
+    public double GpuTempFraction => Math.Clamp((Gpu?.Temp ?? 0) / 100.0, 0, 1);
+    public bool GpuTempHot => (Gpu?.Temp ?? 0) >= 80;
+    public string GpuTempValue => Gpu?.Temp is { } t ? t.ToString("0") + " °C" : "—";
+    public double GpuPowerFraction => Gpu is { PowerLimit: > 0 } g ? Math.Clamp(g.Power / g.PowerLimit, 0, 1) : 0;
+    public string GpuPowerText => Gpu is { PowerLimit: > 0 } g
+        ? g.Power.ToString("0") + " / " + g.PowerLimit.ToString("0") + " W"
+        : Gpu is { } one ? one.Power.ToString("0") + " W" : "—";
+    public double CpuFraction => Math.Clamp(status.CpuPercent / 100.0, 0, 1);
+    public string CpuText => status.CpuPercent.ToString("0") + " %";
+    // In use of usable physical memory — the same two numbers Task Manager's memory page leads with, from
+    // Windows rather than from the engine.
+    public double RamFraction => machine.Memory.Usable > 0
+        ? Math.Clamp((double)machine.Memory.InUse / machine.Memory.Usable, 0, 1)
+        : 0;
+    public string RamText => machine.Memory.Usable > 0
+        ? BasaltLocator.HumanBytes(machine.Memory.InUse) + " / " + BasaltLocator.HumanBytes(machine.Memory.Usable)
+        : "—";
+    public double ExpertFraction => status.ExpertTotal > 0
+        ? Math.Clamp((double)status.ExpertSlots / status.ExpertTotal, 0, 1)
+        : 0;
+    public string ExpertText => status.ExpertTotal > 0
+        ? status.ExpertSlots + " / " + status.ExpertTotal + " experts · " +
+          (status.ExpertCacheMib > 0 ? BasaltLocator.HumanMib(status.ExpertCacheMib) : "—")
+        : "not resident";
+
+    /// <summary>What is left of the card's budget, in the words Windows uses for it.</summary>
+    public string VramFreeText => machine.Video.Known
+        ? BasaltLocator.HumanBytes(machine.Video.Free) + " VRAM free"
+        : status.VramFreeMib > 0 ? BasaltLocator.HumanMib(status.VramFreeMib) + " VRAM free" : "—";
+    public string KvText => string.IsNullOrEmpty(status.Kv) ? "—" : "kv " + status.Kv;
+    public string SpecText => status.Spec > 0 ? status.Spec + " draft tokens" : "no drafting";
+    public string PcieText => status.PcieFrac > 0 ? "pcie " + status.PcieFrac.ToString("0.00") : "pcie idle";
+    public string DiskText => status.DiskReadMb > 0.05 ? status.DiskReadMb.ToString("0.0") + " MB/s from disk" : "no reads";
+    public string QueueText => status.Queued + " queued · " + status.SlotsActive + "/" +
+                                (status.SlotsTotal > 0 ? status.SlotsTotal.ToString() : "?") + " slots";
+    public string LiveText => string.IsNullOrEmpty(status.LiveState) ? "—" : status.LiveState;
+    public string EngineLine
+    {
+        get
+        {
+            var bits = new List<string>();
+            if (!string.IsNullOrWhiteSpace(status.EngineVersion))
+                bits.Add("engine " + status.EngineVersion);
+            if (!string.IsNullOrWhiteSpace(status.Quant))
+                bits.Add(status.Quant);
+            if (!string.IsNullOrWhiteSpace(status.Kv))
+                bits.Add("kv " + status.Kv);
+            if (status.MaxContext > 0)
+                bits.Add("ctx " + status.MaxContext.ToString("N0"));
+            if (status.Images)
+                bits.Add("vision");
+            return bits.Count == 0 ? "—" : string.Join(" · ", bits);
+        }
+    }
+    public string HardwareLine
+    {
+        get
+        {
+            var bits = new List<string>();
+            if (!string.IsNullOrWhiteSpace(status.CpuName))
+                bits.Add(status.CpuName.Trim());
+            if (status.Cores > 0)
+                bits.Add(status.Cores + " cores / " + status.Threads + " threads");
+            if (!string.IsNullOrWhiteSpace(status.Driver))
+                bits.Add("driver " + status.Driver);
+            return bits.Count == 0 ? "—" : string.Join(" · ", bits);
+        }
+    }
+    public string UptimeText
+    {
+        get
+        {
+            if (process.StartedAt is not { } at)
+                return "";
+            var up = DateTime.Now - at;
+            // the word lives here, not in the window: a footer that reads "up " on its own is worse than one
+            // that says nothing
+            return up.TotalHours >= 1
+                ? $"up {(int)up.TotalHours}:{up.Minutes:00}:{up.Seconds:00}"
+                : $"up {up.Minutes}:{up.Seconds:00}";
+        }
+    }
+
+    /// <summary>Everything recomputed from one /metrics reading.</summary>
+    private static readonly string[] DisplayProps =
+    [
+        nameof(DecodeValue), nameof(PrefillValue), nameof(GpuNameText), nameof(GpuUtilFraction), nameof(GpuUtilValue),
+        nameof(GpuMemFraction), nameof(GpuMemText), nameof(GpuTempFraction), nameof(GpuTempHot), nameof(GpuTempValue),
+        nameof(GpuPowerFraction), nameof(GpuPowerText), nameof(CpuFraction), nameof(CpuText),
+        nameof(RamFraction), nameof(RamText), nameof(ExpertFraction), nameof(ExpertText), nameof(VramFreeText),
+        nameof(KvText), nameof(SpecText), nameof(PcieText), nameof(DiskText), nameof(QueueText), nameof(LiveText),
+        nameof(EngineLine), nameof(HardwareLine), nameof(UptimeText),
+    ];
+
+    private void RaiseDisplay() => RaiseAll(DisplayProps);
+
+    /// <summary>How long since the app last heard from the server, for the footer.</summary>
+    public string LastSeenText => status.Reachable ? "updated " + status.SeenAt.ToString("HH:mm:ss") : "";
+
+    public ObservableCollection<RequestRow> Recent { get; } = [];
+    public ObservableCollection<ModelRow> ModelRows { get; } = [];
+    public ObservableCollection<string> Warnings { get; } = [];
+
+    public string Address
+    {
+        get
+        {
+            var cfg = getConfig();
+            return cfg is null ? "open Settings to point at a config file" : client.BaseUrl;
+        }
+    }
+
+    public string ConfigPathText => Settings.ConfigPath;
+    public string ExePathText => Settings.BasaltExePath;
+    public string VersionText => string.IsNullOrWhiteSpace(status.EngineVersion) ? "" : "basalt " + status.EngineVersion;
+
+    // ---- is this basalt behind? ------------------------------------------------------------------------------
+    private BasaltRelease? latest;
+    private bool checkingUpdate;
+    private string updateSaying = "";
+
+    /// <summary>The newest release the app has seen. Null until something answers.</summary>
+    public BasaltRelease? Latest
+    {
+        get => latest;
+        private set
+        {
+            if (!Set(ref latest, value))
+                return;
+            RaiseUpdate();
+        }
+    }
+
+    public bool CheckingUpdate
+    {
+        get => checkingUpdate;
+        private set
+        {
+            if (Set(ref checkingUpdate, value))
+                RaiseUpdate();
+        }
+    }
+
+    /// <summary>
+    /// What the machine is running, as far as anything can tell: the engine on the port, failing that the exe
+    /// file — which for basalt means the number it announced the last time that copy ran, since the file
+    /// itself carries no version. The file-side answer is cached, because this is read on every poll and
+    /// opening the file every second is not how that question should be answered.
+    /// </summary>
+    public string InstalledVersionText
+    {
+        get
+        {
+            if (status.Reachable &&
+                (UpdateChecker.ParseVersion(status.EngineVersion) is not null ||
+                 UpdateChecker.ParseVersion(status.BuildInfo) is not null))
+                return UpdateChecker.InstalledVersionText(status, Settings.BasaltExePath);
+            return InstalledFromExe();
+        }
+    }
+
+    private string installedFromExe = "";
+    private string installedExeKey = "";
+
+    /// <summary>Which copy of the exe a version number would be about.</summary>
+    private string ExeKey() => UpdateChecker.ExeVersionKey(Settings.BasaltExePath);
+
+    private string InstalledFromExe()
+    {
+        var key = ExeKey();
+        if (key == installedExeKey)
+            return installedFromExe;
+
+        installedExeKey = key;
+        installedFromExe = UpdateChecker.InstalledVersionText(null, Settings.BasaltExePath,
+                                                              Settings.EngineVersionMemo, key);
+        return installedFromExe;
+    }
+
+    /// <summary>
+    /// What the engine says about itself while it runs is the only version this exe is willing to give, so it is
+    /// kept for the hours it is not running — which is when the app has to decide whether to mention an update.
+    /// </summary>
+    private void RememberVersion(ServerStatus snapshot)
+    {
+        if (!snapshot.Reachable)
+            return;
+        var text = UpdateChecker.ParseVersion(UpdateChecker.InstalledVersionText(snapshot, Settings.BasaltExePath))?.ToString() ?? "";
+        var key = ExeKey();
+        if (text.Length == 0 || (text == Settings.EngineVersionMemo && key == Settings.EngineVersionMemoKey))
+            return;
+
+        Settings.EngineVersionMemo = text;
+        Settings.EngineVersionMemoKey = key;
+        Settings.Save();
+        if (key == installedExeKey)
+            installedFromExe = text;
+        Append("basalt " + text + " is the engine this machine runs", LogSource.App);
+    }
+
+    public bool UpdateAvailable
+        => Latest is { } release && Settings.DismissedUpdateTag != release.Tag &&
+           UpdateChecker.Compare(InstalledVersionText, release) > 0;
+
+    /// <summary>The banner. Nothing when there is nothing to say.</summary>
+    public string UpdateText
+    {
+        get
+        {
+            if (checkingUpdate)
+                return "looking for a newer basalt…";
+            if (Latest is null)
+                return updateSaying;                       // the reason the last check failed, if there was one
+
+            var release = Latest;
+            var here = InstalledVersionText;
+            var behind = UpdateChecker.Compare(here, release);
+            if (Settings.DismissedUpdateTag == release.Tag && behind > 0)
+                return $"{release.Tag} is out — you told Basalt UI to leave it alone (Settings → Basalt)";
+            if (here.Length == 0)
+                return $"the newest basalt is {release.Tag}, published {PublishText(release)} — Basalt UI cannot tell what this machine runs";
+            if (behind > 0)
+                return $"basalt {release.Tag} is out and this machine has {here} — published {PublishText(release)}";
+            return $"basalt {here} is the newest release";
+        }
+    }
+
+    private static string PublishText(BasaltRelease release)
+    {
+        var utc = release.PublishedAt.Length > 10 ? release.PublishedAt[..10] : release.PublishedAt;
+        if (!DateTime.TryParse(utc, out var day))
+            return "recently";
+        var age = DateTime.UtcNow.Date - day.Date;
+        return age switch
+        {
+            { TotalDays: <= 0 } => "today",
+            { TotalDays: > 0 and < 2 } => "yesterday",
+            _ => $"{day.ToLocalTime():yyyy-MM-dd}",
+        };
+    }
+
+    /// <summary>Which of the release's files belongs here, and how big it is.</summary>
+    public string UpdateAssetText => Latest?.WindowsAsset is { } asset
+        ? asset.Name + " · " + asset.SizeText + (asset.Sha256.Length == 64 ? " · sha256 published" : "")
+        : "this release has no windows zip";
+
+    /// <summary>Why the last check did not answer at all, if it did not. Empty when we know a release.</summary>
+    public string UpdateProblem => Latest is null ? updateSaying : "";
+
+    /// <summary>“Not now” for this tag: the banner goes away and the quiet checks leave it alone.</summary>
+    public void UpdateDismiss()
+    {
+        if (Latest is null)
+            return;
+        Settings.DismissedUpdateTag = Latest.Tag;
+        Settings.Save();
+        RaiseUpdate();
+        Append("app: told not to mention " + Latest.Tag + " again; Settings → Basalt brings it back", LogSource.App);
+    }
+
+    /// <summary>The other half of Dismiss.</summary>
+    public void UpdateUndismiss()
+    {
+        if (Settings.DismissedUpdateTag.Length == 0)
+            return;
+        Settings.DismissedUpdateTag = "";
+        Settings.Save();
+        RaiseUpdate();
+    }
+
+    public void OpenBasaltSettingsFolder()
+    {
+        try
+        {
+            var folder = Path.GetDirectoryName(Settings.BasaltExePath);
+            if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder))
+            {
+                Append("settings: basalt is not where the settings say it is: " + Settings.BasaltExePath, LogSource.Error);
+                return;
+            }
+            Process.Start(new ProcessStartInfo(folder) { UseShellExecute = true });
+        }
+        catch (Exception e)
+        {
+            Append("settings: " + e.Message, LogSource.Error);
+        }
+    }
+
+    /// <summary>Why the banner is on the screen at all: news to act on, or a check in front of the user.</summary>
+    public bool UpdateSaysAnything => UpdateAvailable || checkingUpdate;
+
+    private void RaiseUpdate()
+        => RaiseAll(nameof(UpdateAvailable), nameof(UpdateSaysAnything), nameof(UpdateText),
+                    nameof(UpdateAssetText), nameof(InstalledVersionText));
+
+    /// <summary>
+    /// Ask GitHub. Quiet calls only say something when they found a release this machine does not have; an
+    /// explicit check always answers, because a button that does nothing looks broken.
+    /// </summary>
+    public async Task CheckForUpdateAsync(bool manual)
+    {
+        if (checkingUpdate)
+            return;
+        CheckingUpdate = true;
+
+        // The clock is stamped before the call, not after: an attempt that failed is still an attempt, and
+        // the auto-check retries on this same value instead of hammering GitHub every couple of seconds.
+        Settings.LastUpdateCheckUtc = DateTime.UtcNow;
+        Settings.Save();
+
+        try
+        {
+            var release = await UpdateChecker.LatestAsync(CancellationToken.None);
+            Latest = release;
+            var behind = UpdateChecker.Compare(InstalledVersionText, release);
+            if (behind > 0)
+            {
+                // Once per release, not once per check: the quiet check, the six-hour one and a hand-pressed
+                // button used to write the same line over and over, which turned the log into a shout.
+                if (announcedTag != release.Tag)
+                {
+                    announcedTag = release.Tag;
+                    Append($"update: basalt {release.Tag} is out — this machine has {(InstalledVersionText.Length == 0 ? "nothing I can read" : InstalledVersionText)}", LogSource.App);
+                }
+                if (manual)
+                    Notice?.Invoke($"{release.Tag} is out: {(release.Name.Length > 0 ? release.Name : release.Tag)}");
+            }
+            else if (behind == 0 && manual)
+                Notice?.Invoke("basalt " + release.Tag + " is the newest release");
+        }
+        catch (Exception e)
+        {
+            updateSaying = "the update check did not go: " + Net.Explain(e);
+            Append("update: " + updateSaying, LogSource.Error);
+            if (manual)
+                Notice?.Invoke(Net.Explain(e));
+        }
+        finally
+        {
+            CheckingUpdate = false;
+            RaiseUpdate();
+        }
+    }
+
+    /// <summary>
+    /// One quiet check per app run. The settings switch turns it off entirely; a manual check always works.
+    /// </summary>
+    private bool autoCheckDone;
+
+    /// <summary>The release already named in the log, so it is announced once and not once per check.</summary>
+    private string announcedTag = "";
+
+    /// <summary>
+    /// The quiet check. Once soon after the app starts, and then every few hours it stays open, so a release
+    /// published overnight is sitting there when the window is. A manual check always works, even with the
+    /// setting off, and always resets the same clock.
+    /// </summary>
+    public void MaybeCheckForUpdate()
+    {
+        if (checkingUpdate || !Settings.CheckForUpdates)
+            return;
+        if (autoCheckDone && DateTime.UtcNow - Settings.LastUpdateCheckUtc < TimeSpan.FromHours(6))
+            return;
+        autoCheckDone = true;
+        _ = CheckForUpdateAsync(manual: false);
+    }
+
+    /// <summary>When the app last asked — the settings page quotes it, so a silent check is not a mystery.</summary>
+    public string UpdateCheckedAtText
+        => Settings.LastUpdateCheckUtc == default ? "never" : Settings.LastUpdateCheckUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+
+    /// <summary>The release the user told the app to stop mentioning, if any.</summary>
+    public string DismissedTag => Settings.DismissedUpdateTag;
+
+    /// <summary>
+    /// An update replaces basalt.exe, and Windows will not replace a file that is running. So the stop is part
+    /// of the update rather than a errand sent the user on: stop the server, put the new files down, start it
+    /// again — each one said out loud in the log pane, so someone back at the window later can read what
+    /// happened in what order. A server this app did not start is adopted only to be stopped politely, and
+    /// only after the user answered the question <see cref="PeekUpdatePlan" /> put in front of them; once it
+    /// comes back it is Basalt UI's own, which is the honest state of affairs afterwards.
+    /// </summary>
+    private bool busyUpdating;
+
+    /// <summary>What stands between the new release and the disk, right now. The window asks about this.</summary>
+    public UpdatePlan PeekUpdatePlan()
+    {
+        var port = getConfig()?.Port ?? 8080;
+        var answers = process.IsAlive || status.Reachable;
+
+        int[] listeners = [];
+        if (process.IsAlive)
+            listeners = [process.Pid];
+        else if (answers)
+        {
+            // Answering but not ours: the port table is the only way to learn which process to ask.
+            try
+            {
+                listeners = NativeMethods.ListenersOnPort((ushort)port);
+            }
+            catch (Exception e)
+            {
+                AppPaths.Log("update: port scan: " + e.Message);
+            }
+        }
+
+        return UpdatePlan.Decide(answers, process.IsAlive && process.StartedByUs, listeners, port);
+    }
+
+    public async Task<string> UpdateBasaltAsync()
+    {
+        if (busyUpdating)
+            return "that update is still running — the console is where it is talking";
+        busyUpdating = true;
+        try
+        {
+            return await PutBasaltAsync();
+        }
+        finally
+        {
+            busyUpdating = false;
+        }
+    }
+
+    private async Task<string> PutBasaltAsync()
+    {
+        var release = Latest;
+        if (release?.WindowsAsset is null)
+            return "ask me again once the update check has answered";
+
+        var plan = PeekUpdatePlan();
+        var wasRunning = false;
+        if (plan.Answers)
+        {
+            if (plan.Blocked)
+                return $"something is answering on port {plan.Port} and no process behind it can be named from here — nothing was replaced";
+
+            if (plan.AskFirst)
+            {
+                process.ServePort = plan.Port;       // a stop reaches the engine through the port, not through us
+                // Ctrl+C has to be sent somewhere, and a process this app only knows as a number on the port
+                // table needs to be in its own books before the stop machinery will act on it. The user said
+                // yes to exactly this in the question.
+                process.Adopt(plan.Pid, $"running — pid {plan.Pid}, stopped for the update");
+                Append($"update: taking over {plan.Describe()} so it can be stopped politely", LogSource.App);
+            }
+
+            Append("update: stopping the server", LogSource.App);
+            if (!await process.StopAsync(Settings.StopGraceSeconds))
+            {
+                process.ClearAdoption();     // the books back as they were found: nothing was stopped
+                return "the server would not stop — nothing was replaced";
+            }
+
+            // The port, not the process, is what has to be free: a stopped parent with a child still holding
+            // the socket would fail the file replacement a second later with a worse message.
+            await poller.BeatAsync();
+            if (status.Reachable)
+                return $"something is still answering on port {plan.Port} — nothing was replaced";
+
+            wasRunning = true;
+            SetForeign([]);                          // whatever was out there is being replaced by ours now
+        }
+
+        var zip = UpdateInstaller.LocalZipFor(release);
+        if (!File.Exists(zip))
+        {
+            var progress = new Progress<DownloadProgress>(p => OnUi(() =>
+            {
+                Append($"update: {p.Text}", LogSource.App);
+            }));
+            var error = await UpdateInstaller.DownloadAsync(release, Settings, progress, line => Append("update: " + line, LogSource.App), CancellationToken.None);
+            if (error is not null)
+                return error;
+            if (!File.Exists(zip))
+                return "the download finished without leaving the file behind";
+        }
+
+        var installRoot = Path.GetDirectoryName(Settings.BasaltExePath) ?? "";
+        var trace = new Action<string>(line => Append("update: " + line, LogSource.App));
+        var applyError = await UpdateInstaller.ApplyAsync(release, installRoot, trace, CancellationToken.None);
+        if (applyError is not null)
+            return applyError;
+
+        // The exe now on disk is a different file, and it is this release: remember that about it, so the app is
+        // not left guessing which number belongs there until the engine starts and says it again.
+        installedExeKey = "";
+        lastVersionSaw = "";
+        Settings.EngineVersionMemo = UpdateChecker.ParseVersion(release.Tag)?.ToString() ?? "";
+        Settings.EngineVersionMemoKey = ExeKey();
+        Settings.LastUpdateCheckUtc = DateTime.UtcNow;
+        Settings.DismissedUpdateTag = "";
+        Settings.Save();
+        Latest = null;
+        announcedTag = "";                    // a later release has to be able to announce itself too
+        RaiseUpdate();
+
+        // The server that was running was stopped to free the files; whether it comes back up is the
+        // user's call, made in the window the moment the install lands — the old auto-start took the
+        // choice away and then had to announce what it had done.
+        if (wasRunning)
+            Append("update: " + release.Tag + " is installed — the server is still down, starting it is a question in the window", LogSource.App);
+        else
+            Notice?.Invoke(release.Tag + " is installed — start the server to run it");
+        return "";
+    }
+
+    /// <summary>Open the release page, notes and all, in the browser the user already trusts.</summary>
+    public void OpenReleasePage()
+    {
+        var url = Latest?.HtmlUrl;
+        if (string.IsNullOrWhiteSpace(url))
+            url = UpdateChecker.ReleasePage;
+        if (!TryOpen(url))
+            Notice?.Invoke("could not open the browser — the release notes are at " + url);
+        else
+            Notice?.Invoke("the release notes are opening in your browser");
+    }
+
+    public void OpenModelsFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(Settings.ModelsFolder);
+            Process.Start(new ProcessStartInfo(Settings.ModelsFolder) { UseShellExecute = true });
+        }
+        catch (Exception e)
+        {
+            Append("models: " + e.Message, LogSource.Error);
+        }
+    }
+
+    public string ModelsFolderText => Settings.ModelsFolder;
+
+    public event Action? ModelsBrowserRequested;
+
+    public void OpenModelsBrowser() => ModelsBrowserRequested?.Invoke();
+
+    // ---- the log pane ---------------------------------------------------------------------------------------
+    public ObservableCollection<LogLine> Log { get; } = [];
+    private const int LogCapacity = 2000;
+
+    public string LogFilter
+    {
+        get => logFilter;
+        set
+        {
+            if (!Set(ref logFilter, value))
+                return;
+            ApplyFilter();
+        }
+    }
+
+    private readonly List<LogLine> all = [];
+    private readonly object logGate = new();
+
+    public void Append(string text, LogSource source = LogSource.Server)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+        var line = new LogLine(DateTime.Now, text, source);
+        lock (logGate)
+        {
+            all.Add(line);
+            if (all.Count > LogCapacity)
+                all.RemoveRange(0, all.Count - LogCapacity);
+        }
+        if (MatchesFilter(line))
+            OnUi(() =>
+            {
+                Log.Add(line);
+                while (Log.Count > LogCapacity)
+                    Log.RemoveAt(0);
+            });
+    }
+
+    private bool MatchesFilter(LogLine line)
+        => string.IsNullOrWhiteSpace(logFilter) ||
+           line.Text.Contains(logFilter, StringComparison.OrdinalIgnoreCase);
+
+    private void ApplyFilter()
+    {
+        List<LogLine> snapshot;
+        lock (logGate) snapshot = all.Where(MatchesFilter).ToList();
+        OnUi(() =>
+        {
+            Log.Clear();
+            foreach (var line in snapshot)
+                Log.Add(line);
+        });
+    }
+
+    public string SaveLogTo(string path)
+    {
+        try
+        {
+            List<LogLine> snapshot;
+            lock (logGate) snapshot = [.. all];
+            File.WriteAllLines(path, snapshot.Select(l => $"{l.At:yyyy-MM-dd HH:mm:ss} {l.Text}"));
+            return "";
+        }
+        catch (Exception e)
+        {
+            return e.Message;
+        }
+    }
+
+    // ---- actions ---------------------------------------------------------------------------------------
+    public string EffectiveApiKey => Settings.ApiKey;
+
+    /// <summary>The address and key to poll, straight from the config file the app points at.</summary>
+    public void ReapplyPolling()
+    {
+        var cfg = getConfig();
+        var port = cfg?.Port ?? 8080;
+        var host = cfg?.Host ?? "127.0.0.1";
+        poller.Configure(port, host, string.IsNullOrWhiteSpace(Settings.ApiKey) ? null : Settings.ApiKey,
+                         readServerLog: !process.StartedByUs);
+        process.ServePort = port;                                  // how a stop finds the server's own processes
+        Raise(nameof(Address));
+        Raise(nameof(Url));
+    }
+
+    public async Task<bool> StartAsync()
+    {
+        if (!PrepareStart(out var spec))
+            return false;
+        Append($"app: starting {Path.GetFileName(spec.ExePath)} {spec.BuildArguments()}", LogSource.App);
+        var ok = process.Start(spec);
+        OnUi(() => RefreshCommands());
+        if (ok)
+        {
+            ReapplyPolling();
+            poller.Start(Settings.PollMs);
+            await poller.BeatAsync();
+        }
+        return ok;
+    }
+
+    /// <summary>Checks the paths and api-key rules, and hands back the launch spec. Shows what is wrong.</summary>
+    private bool PrepareStart(out LaunchSpec spec)
+    {
+        spec = new LaunchSpec { ExePath = "", ConfigPath = "" };
+        var cfg = getConfig();
+
+        if (string.IsNullOrWhiteSpace(Settings.BasaltExePath) || !File.Exists(Settings.BasaltExePath))
+        {
+            Notice?.Invoke("Set the path to basalt.exe in Settings → Paths.");
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(Settings.ConfigPath) || !File.Exists(Settings.ConfigPath))
+        {
+            Notice?.Invoke("Set the config file in Settings → Paths; basalt needs one to serve several models.");
+            return false;
+        }
+        if (cfg is not null && cfg.KeyWouldBeRefused)
+        {
+            Notice?.Invoke("Remove api-key from the config file: basalt refuses it there. Put it in Settings → Paths.");
+            return false;
+        }
+        if (cfg is not null)
+        {
+            var bad = cfg.Validate(SettingsCatalog.Shared).Where(i => i.Error).ToList();
+            if (bad.Count > 0)
+            {
+                Notice?.Invoke("The config has errors: " + string.Join(" | ", bad.Select(b => b.Where + " — " + b.Message)));
+                return false;
+            }
+        }
+
+        spec = new LaunchSpec
+        {
+            ExePath = Settings.BasaltExePath,
+            ConfigPath = Settings.ConfigPath,
+            ExtraArgs = Settings.ExtraArgs,
+            ApiKey = Settings.ApiKey,
+            Port = cfg?.Port ?? 8080,
+        };
+        return true;
+    }
+
+    public async Task StopAsync()
+    {
+        if (!process.IsAlive)
+            return;
+        Append("app: stopping (Ctrl+C to the server)", LogSource.App);
+        await process.StopAsync(Settings.StopGraceSeconds);
+        OnUi(RefreshCommands);
+    }
+
+    public async Task RestartAsync()
+    {
+        await StopAsync();
+        await StartAsync();
+    }
+
+    /// <summary>Load or unload the model in place, without touching the process.</summary>
+    public async Task ControlAsync(string path, string? body, string what)
+    {
+        var (ok, detail) = await client.PostAsync(path, body);
+        Append($"server: {what} → {detail}", ok ? LogSource.App : LogSource.Error);
+        trace($"{what} -> {detail}");
+        await poller.BeatAsync();
+    }
+
+    /// <summary>
+    /// The engine's web page, opened inside the app — the click must always visibly do something, and a
+    /// browser the user never sees come up is how it stopped doing that. The page runs on the embedded
+    /// browser (WebView2). The command itself still asks for a server that answers: with none, there is no
+    /// page to open, so the button reads disabled rather than opening an error page.
+    /// </summary>
+    public event Action<string>? WebUiRequested;
+
+    public void OpenWebUi() => WebUiRequested?.Invoke(client.BaseUrl + "/");
+
+    /// <summary>The same idea for the raw JSON the panel is built from.</summary>
+    public void OpenApi() => WebUiRequested?.Invoke(client.BaseUrl + "/health");
+
+    /// <summary>
+    /// Opens in whatever browser the machine trusts; false when the shell refused. After the launch the
+    /// app watches for a new window coming up and raises it, because a tab that arrives behind this one
+    /// reads as the click having done nothing.
+    /// </summary>
+    private bool TryOpen(string url)
+    {
+        try
+        {
+            var before = Shell.Raise.Snapshot();
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            Shell.Raise.AfterLaunch(before);
+            return true;
+        }
+        catch (Exception e)
+        {
+            Append("open: " + e.Message, LogSource.Error);
+            return false;
+        }
+    }
+
+    public void OpenUrl(string url)
+    {
+        if (!TryOpen(url))
+            Notice?.Invoke("could not open " + url);
+    }
+
+    /// <summary>A server answering on the port that we did not start: show it, and let the user stop the other one.</summary>
+    public void AdoptExternal(int pid)
+    {
+        // A stop reaches the engine processes through the port, so a server adopted from elsewhere needs the
+        // port the config names; without it only the launcher would get the Ctrl+C and the model would stay up.
+        process.ServePort = getConfig()?.Port ?? 8080;
+        process.Adopt(pid, $"running — pid {pid}, started elsewhere");
+        ReapplyPolling();
+        poller.Start(Settings.PollMs);
+        OnUi(RefreshCommands);
+    }
+
+    public void ForgetExternal()
+    {
+        process.ClearAdoption();
+        OnUi(RefreshCommands);
+    }
+
+    public Task ForceStopAsync() => process.StopAsync(2, force: true);
+
+    // ---- a server we did not start ----------------------------------------------------------------------
+    private int[] foreignPids = [];
+
+    /// <summary>pids answering on the port that this app did not launch; empty once the user decides.</summary>
+    public int[] ForeignPids
+    {
+        get => foreignPids;
+        private set
+        {
+            if (foreignPids.SequenceEqual(value))
+                return;
+            foreignPids = value;
+            Raise(nameof(ForeignPids));
+            Raise(nameof(HasForeign));
+            Raise(nameof(ForeignHint));
+        }
+    }
+
+    public bool HasForeign => foreignPids.Length > 0;
+
+    public string ForeignHint
+    {
+        get
+        {
+            var pidList = string.Join(", ", foreignPids);
+            return pidList.Length == 0
+                ? ""
+                : $"A server is answering on {client.BaseUrl} that Basalt UI did not start (pid {pidList}). " +
+                  "You can watch it and load or unload models; its own terminal keeps control of starting and stopping.";
+        }
+    }
+
+    public event Action? TakeOverRequested;
+
+    public void SetForeign(int[] pids) => OnUi(() => ForeignPids = pids ?? []);
+
+    /// <summary>Watch the other server here too: display and HTTP control, never a kill.</summary>
+    public void TakeOverForeign() => TakeOverRequested?.Invoke();
+
+    public void IgnoreForeign() => ForeignPids = [];
+
+    /// <summary>Run a different model without restarting the server.</summary>
+    public async Task SwitchModelAsync(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+        var body = "{\"model\":" + System.Text.Json.JsonSerializer.Serialize(name) + "}";
+        await ControlAsync("/v1/load", body, "switch to " + name);
+    }
+
+    // ---- plumbing ---------------------------------------------------------------------------------------
+    private void OnProcessState(RunState state, string detail) => OnUi(() =>
+    {
+        if (!status.Reachable)
+            Status = status with { };                        // recompute the labels against the new process state
+        else if (state is RunState.Stopped or RunState.Failed)
+            Status = ServerStatus.Down(detail);
+        Raise(nameof(RunStateText));
+        Raise(nameof(IsRunning));
+        Raise(nameof(ModelsEmptyText));
+        RefreshCommands();
+    });
+
+    private string lastVersionSaw = "";
+
+    private void OnStatus(ServerStatus snapshot) => OnUi(() =>
+    {
+        Status = snapshot;
+        machine = poller.Machine;       // read on the same beat, off the UI thread: Windows' own figures
+        RaiseAll(nameof(DecodeSeries), nameof(PrefillSeries), nameof(GpuUtilSeries), nameof(GpuPowerSeries),
+                 nameof(GpuTempSeries), nameof(LastSeenText));
+        RaiseDisplay();
+        Raise(nameof(StatusText));
+        Raise(nameof(VersionText));
+
+        // the engine naming itself is the moment the update banner can say something new, and the moment
+        // there is something worth remembering about the file on disk
+        if (VersionText != lastVersionSaw)
+        {
+            lastVersionSaw = VersionText;
+            RememberVersion(snapshot);
+            RaiseUpdate();
+        }
+
+        // A beat, reachable or not, is the app's clock. With the server down the installed number comes from what
+        // the engine last told us about this very file, so a check is worth as much either way.
+        if (snapshot.Reachable || !autoCheckDone)
+            MaybeCheckForUpdate();     // the clock inside decides; this only asks it whether it is time
+
+        if (snapshot.Reachable && Recent.Count == 0)
+            RebuildRows(snapshot);
+        else if (snapshot.Reachable && snapshot.Requests.Count > 0 &&
+                 snapshot.Requests[0].Id != Recent.FirstOrDefault()?.Id)
+            RebuildRows(snapshot);
+
+        RebuildModels(snapshot);
+        RebuildWarnings(snapshot);
+    });
+
+    private void RebuildRows(ServerStatus snapshot)
+    {
+        Recent.Clear();
+        foreach (var row in snapshot.Requests)
+            Recent.Add(row);
+    }
+
+    private string lastModelIds = "";
+
+    private void RebuildModels(ServerStatus snapshot)
+    {
+        var ids = string.Join("|", snapshot.Models.Select(m => m.Id + ":" + m.Status + ":" + m.Asleep));
+        if (ids == lastModelIds)
+            return;
+        lastModelIds = ids;
+        ModelRows.Clear();
+        foreach (var m in snapshot.Models)
+            ModelRows.Add(m);
+    }
+
+    private void RebuildWarnings(ServerStatus snapshot)
+    {
+        var list = new List<string>();
+        if (!string.IsNullOrEmpty(snapshot.Spill))
+            list.Add("experts read from disk — " + snapshot.Spill);
+        if (snapshot.Swap is not null)
+            list.Add(snapshot.Swap);
+        if (snapshot.Gpus.FirstOrDefault() is { } gpu && gpu.Temp >= 80)
+            list.Add($"GPU at {gpu.Temp:0} °C");
+        if (snapshot.Gpus.FirstOrDefault() is { } g2 && g2.PowerLimit > 0 && g2.Power >= g2.PowerLimit * 0.97)
+            list.Add($"GPU at its power limit ({g2.PowerLimit:0} W)");
+        // Windows' own figure, so this warning cannot contradict the RAM bar above it. The bar is calm until
+        // the machine is genuinely out of room, and a Windows memory cache keeps "available" low by design,
+        // which is why this line names what is left instead of a percentage.
+        if (machine.Memory.Usable > 0 && machine.Memory.InUse / (double)machine.Memory.Usable > 0.97)
+            list.Add("RAM is almost full — " +
+                     BasaltLocator.HumanBytes(machine.Memory.Usable - machine.Memory.InUse) + " available");
+
+        // From 0.3.3 the engine refuses to start with the answer room switched flat off: it takes a number or
+        // auto. It is the exe on disk that decides, not the one answering right now: the refusal would happen on
+        // the next start, which is exactly when this is worth saying. The version read is cached.
+        if (getConfig() is { AnswerRoomSwitchedOff: true } &&
+            UpdateChecker.ParseVersion(InstalledFromExe()) is { } here && here >= new Version(0, 3, 3))
+            list.Add("“answer-room”: false stops basalt 0.3.3 and newer from starting — switch it back on, or give it a number in the Raw JSON tab");
+
+        if (!string.IsNullOrEmpty(snapshot.Error))
+            list.Add(snapshot.Error!);
+
+        if (list.Count == Warnings.Count && list.SequenceEqual(Warnings))
+            return;
+        Warnings.Clear();
+        foreach (var w in list)
+            Warnings.Add(w);
+    }
+
+    private void RefreshCommands()
+    {
+        foreach (var cmd in new ICommand[] { StartCommand, StopCommand, RestartCommand, LoadCommand, UnloadCommand, OpenWebUiCommand, OpenApiCommand })
+            (cmd as RelayCommand)?.RaiseCanExecuteChanged();
+        Raise(nameof(IsRunning));
+        Raise(nameof(StatusText));
+    }
+
+    private static void OnUi(Action action)
+    {
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher is null || dispatcher.CheckAccess())
+            action();
+        else
+            dispatcher.BeginInvoke(action);
+    }
+}

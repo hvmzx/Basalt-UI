@@ -1,0 +1,43 @@
+<!--
+  Dialog.xaml — the app's own question box. The system MessageBox answers the same need with a
+  different century of styling, so anything that has to ask the user a question asks it here instead:
+  a small card, one line of title, the question as prose, and the choice as two buttons.
+-->
+<Window x:Class="BasaltUI.Shell.Dialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="Basalt UI"
+        Width="460"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        Background="{DynamicResource Window}"
+        Foreground="{StaticResource TextPrimary}"
+        FontFamily="{StaticResource FontText}" FontSize="13"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        ShowInTaskbar="False"
+        ResizeMode="NoResize">
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="0" GlassFrameThickness="0"
+                            CornerRadius="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Border Background="{DynamicResource Surface}" CornerRadius="14" Padding="22,20,22,18"
+            BorderBrush="{DynamicResource Line}" BorderThickness="1">
+        <StackPanel>
+            <TextBlock x:Name="TitleText" Style="{StaticResource Title}" FontSize="14.5" />
+            <TextBlock x:Name="MessageText" Style="{StaticResource Label}" FontSize="12.5"
+                       Foreground="{DynamicResource TextPrimary}" Margin="0,10,0,0"
+                       TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" MinWidth="92"
+                        IsCancel="True" Margin="0,0,8,0" />
+                <Button x:Name="ConfirmButton" Content="Continue" Click="Confirm_Click" MinWidth="92"
+                        Style="{StaticResource AccentButton}" IsDefault="True" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

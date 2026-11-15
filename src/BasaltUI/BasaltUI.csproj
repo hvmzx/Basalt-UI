@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>BasaltUI</RootNamespace>
+    <AssemblyName>BasaltUI</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <Product>Basalt UI</Product>
+    <Description>Windows tray manager for the basalt inference engine</Description>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <AnalysisLevel>latest-minimum</AnalysisLevel>
+    <ApplicationIcon>Assets\basalt.ico</ApplicationIcon>
+    <!-- InvariantGlobalization is deliberately NOT turned on, tempting as the smaller/faster runtime config
+         looks: WPF refuses to work with it. The first value a binding tries to format throws
+         "Cannot find non-neutral culture related to 'en-us'" inside XmlLanguage.GetSpecificCulture, and the
+         window never appears — and so do FormattedText calls in the sparklines and bars. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms is here for the tray icon only; keeping its namespaces out of the global scope lets
+         WPF's Application, Brush, TextBox and ComboBox mean what they say everywhere else. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- one source of truth: the catalog compiled from the basalt docs stays in design/ -->
+    <EmbeddedResource Include="..\..\design\settings-catalog.json" LogicalName="BasaltUI.settings-catalog.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+
+</Project>

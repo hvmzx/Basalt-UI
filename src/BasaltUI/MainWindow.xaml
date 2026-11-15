@@ -1,0 +1,456 @@
+<Window x:Class="BasaltUI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:c="clr-namespace:BasaltUI.Controls"
+        xmlns:cv="clr-namespace:BasaltUI.Converters"
+        xmlns:pages="clr-namespace:BasaltUI"
+        Title="Basalt UI"
+        Width="1160" Height="800" MinWidth="900" MinHeight="580"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        Background="{StaticResource Window}"
+        Foreground="{StaticResource TextPrimary}"
+        FontFamily="{StaticResource FontText}" FontSize="13"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+
+    <!-- Custom chrome: the standard title bar is gone and this window draws its own 56 px header row,
+         which is the caption — drag, double-click, snap and Aero all keep working through WindowChrome.
+         Round corners come from DWM (set in code-behind). -->
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="56" ResizeBorderThickness="8,8,8,8" GlassFrameThickness="0"
+                            CornerRadius="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="Chip" TargetType="{x:Type TextBlock}" BasedOn="{StaticResource Label}">
+            <Setter Property="FontSize" Value="11.5" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFaint}" />
+            <Setter Property="Margin" Value="0,0,14,0" />
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="56" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- ============ header: the caption row ============ -->
+        <DockPanel Grid.Row="0" LastChildFill="False" Margin="20,0,8,0" Background="Transparent">
+            <!-- the dashboard header: what the server is doing -->
+            <StackPanel x:Name="MainTitle" DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="basalt" Style="{StaticResource Big}" FontSize="17" VerticalAlignment="Center" />
+                <Border Style="{StaticResource Pill}" Margin="12,0,0,0">
+                    <TextBlock Text="{Binding RunStateText}" Style="{StaticResource PillText}" />
+                </Border>
+                <TextBlock Text="{Binding StatusText}" Style="{StaticResource Label}" FontSize="12.5"
+                           Margin="14,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                           MaxWidth="420" />
+            </StackPanel>
+
+            <!-- a subpage's header: one arrow back, one title — settings and release notes share it -->
+            <StackPanel x:Name="PageTitle" DockPanel.Dock="Left" Orientation="Horizontal"
+                        VerticalAlignment="Center" Visibility="Collapsed"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Click="Back_Click" Background="Transparent" BorderBrush="Transparent"
+                        Padding="8,4" Margin="-8,0,4,0" ToolTip="Back to the dashboard">
+                    <TextBlock FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE72B;" />
+                </Button>
+                <TextBlock x:Name="PageTitleText" Text="Settings" Style="{StaticResource Big}" FontSize="17"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <!-- the dashboard's actions -->
+                <StackPanel x:Name="MainActions" Orientation="Horizontal">
+                    <Button Command="{Binding SettingsCommand}" Margin="0,0,2,0" ToolTip="Settings and raw config">
+                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE713;" /><Run Text="  Settings" /></TextBlock>
+                    </Button>
+                    <Button Command="{Binding OpenWebUiCommand}" Margin="0,0,2,0" ToolTip="Open the engine's own web page">
+                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE774;" /><Run Text="  Web UI" /></TextBlock>
+                    </Button>
+                    <Button Command="{Binding RestartCommand}" Margin="0,0,10,0" ToolTip="Stop, then start again">
+                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE72C;" /><Run Text="  Restart" /></TextBlock>
+                    </Button>
+                    <Button Style="{StaticResource DangerButton}" Command="{Binding StopCommand}"
+                            Margin="0,0,6,0" MinWidth="70" ToolTip="Ask the server to shut down">
+                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE71A;" /><Run Text="  Stop" /></TextBlock>
+                    </Button>
+                    <Button Style="{StaticResource AccentButton}" Command="{Binding StartCommand}" MinWidth="84"
+                            ToolTip="Start the server">
+                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE768;" /><Run FontWeight="SemiBold" Text="  Start" /></TextBlock>
+                    </Button>
+                </StackPanel>
+
+                <!-- and the window itself: min, maximise, close -->
+                <StackPanel Orientation="Horizontal" Margin="8,0,0,0">
+                    <Button Style="{StaticResource CaptionButton}" Content="&#xE921;" Click="Minimize_Click" ToolTip="Minimise" />
+                    <Button x:Name="MaxButton" Style="{StaticResource CaptionButton}" Content="&#xE922;" Click="Maximize_Click" ToolTip="Maximise" />
+                    <Button Style="{StaticResource CaptionCloseButton}" Content="&#xE8BB;" Click="Close_Click" ToolTip="Close" />
+                </StackPanel>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- ============ the body: dashboard, or a page over it ============ -->
+        <Grid Grid.Row="1">
+            <pages:SettingsPage x:Name="SettingsPanel" Visibility="Collapsed" />
+            <pages:ReleaseNotesPage x:Name="NotesPage" Visibility="Collapsed" />
+
+            <Grid x:Name="PageMain">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ============ a server we did not start, and a basalt that is behind ============ -->
+        <StackPanel Grid.Row="0" Margin="20,0,20,0">
+            <Border Margin="0,4,0,0" Style="{StaticResource Banner}" Background="{DynamicResource WaitBg}"
+                    Visibility="{Binding HasForeign, Converter={x:Static cv:BoolToVisibility.Instance}}">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="TakeOverButton" Content="Watch it here" Style="{StaticResource GhostButton}"
+                                Click="TakeOver_Click" Margin="0,0,8,0" />
+                        <Button x:Name="IgnoreButton" Content="Ignore" Style="{StaticResource GhostButton}"
+                                Click="IgnoreForeign_Click" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding ForeignHint}" TextWrapping="Wrap" VerticalAlignment="Center"
+                               Margin="0,0,12,0" />
+                </DockPanel>
+            </Border>
+
+            <Border Margin="0,12,0,0" Style="{StaticResource Banner}" Background="{DynamicResource AccentSoft}"
+                    Visibility="{Binding UpdateAvailable, Converter={x:Static cv:BoolToVisibility.Instance}}">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="NotesButton" Content="Release notes" Style="{StaticResource GhostButton}"
+                                Click="UpdateNotes_Click" Margin="0,0,8,0" />
+                        <Button x:Name="DismissButton" Content="Not now" Style="{StaticResource GhostButton}"
+                                Click="DismissUpdate_Click" Margin="0,0,8,0" IsEnabled="{Binding UpdateAvailable}" />
+                        <Button x:Name="UpdateButton" Content="Update basalt" Style="{StaticResource AccentButton}"
+                                Click="Update_Click" IsEnabled="{Binding UpdateAvailable}" MinWidth="116" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,12,0">
+                        <TextBlock Text="{Binding UpdateText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding UpdateAssetText}" Style="{StaticResource Label}" Margin="0,4,0,0"
+                                   TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+        </StackPanel>
+
+        <!-- ============ body ============ -->
+        <Grid Grid.Row="1" Margin="20,14,20,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="460" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" MinWidth="300" MaxWidth="430" />
+            </Grid.ColumnDefinitions>
+
+            <!-- left column: throughput, machine, requests -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,2,16">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="Throughput" Style="{StaticResource CardTitle}" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding LiveText}" Style="{StaticResource Label}" />
+                            </DockPanel>
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <c:Sparkline Grid.Column="0" Height="104" Caption="decode"
+                                             Values="{Binding DecodeSeries}"
+                                             ValueText="{Binding DecodeValue}"
+                                             Stroke="{DynamicResource Accent}" />
+                                <c:Sparkline Grid.Column="2" Height="104" Caption="prefill"
+                                             Values="{Binding PrefillSeries}" ValueText="{Binding PrefillValue}"
+                                             Stroke="{DynamicResource Slate}" />
+                            </Grid>
+                            <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding QueueText}" Style="{StaticResource Chip}" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding EngineLine}" Style="{StaticResource Label}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <StackPanel>
+                                <TextBlock Text="{Binding GpuNameText}" Style="{StaticResource CardTitle}"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding HardwareLine}" Style="{StaticResource Label}"
+                                           Foreground="{DynamicResource TextFaint}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="24" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <c:Bar Caption="utilisation" Height="40"
+                                           Fraction="{Binding GpuUtilFraction}" ValueText="{Binding GpuUtilValue}" />
+                                    <c:Bar Caption="VRAM" Height="40" Margin="0,8,0,0" Calm="True"
+                                           ToolTip="The card's own memory as DXGI describes it, filled by the counter the GPU page of Task Manager samples — nvidia-smi counts 420 MB more because it adds the driver's carve-out."
+                                           Fraction="{Binding GpuMemFraction}" ValueText="{Binding GpuMemText}" />
+                                    <c:Bar Caption="temperature" Height="40" Margin="0,8,0,0"
+                                           Fraction="{Binding GpuTempFraction}" ValueText="{Binding GpuTempValue}"
+                                           Warning="{Binding GpuTempHot}" />
+                                    <c:Bar Caption="power" Height="40" Margin="0,8,0,0"
+                                           Fraction="{Binding GpuPowerFraction}" ValueText="{Binding GpuPowerText}" />
+                                </StackPanel>
+                                <Grid Grid.Column="2" Margin="6,0,0,0">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <c:Sparkline Grid.Row="0" Height="74" Margin="0,0,0,8" Caption="gpu history"
+                                                 Values="{Binding GpuUtilSeries}" Percent="True"
+                                                 Stroke="{DynamicResource Good}" />
+                                    <c:Sparkline Grid.Row="1" Height="74" Margin="0,8,0,0" Caption="watts"
+                                                 Values="{Binding GpuPowerSeries}" Stroke="{DynamicResource Warn}" />
+                                </Grid>
+                            </Grid>
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="24" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <c:Bar Caption="RAM" Height="40" Calm="True" Fraction="{Binding RamFraction}"
+                                           ToolTip="In use of the physical memory Windows can actually use — the same figures the memory page of Task Manager leads with."
+                                           ValueText="{Binding RamText}" />
+                                    <c:Bar Caption="cpu" Height="40" Margin="0,8,0,0" Fraction="{Binding CpuFraction}"
+                                           ValueText="{Binding CpuText}" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <c:Bar Caption="expert cache" Height="40" Calm="True"
+                                           Fraction="{Binding ExpertFraction}" ValueText="{Binding ExpertText}" />
+                                    <WrapPanel Margin="0,12,0,0">
+                                        <TextBlock Text="{Binding VramFreeText}" Style="{StaticResource Chip}" />
+                                        <TextBlock Text="{Binding SpecText}" Style="{StaticResource Chip}" />
+                                        <TextBlock Text="{Binding PcieText}" Style="{StaticResource Chip}" />
+                                        <TextBlock Text="{Binding DiskText}" Style="{StaticResource Chip}" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="Recent requests" Style="{StaticResource CardTitle}" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding Status.SeenAt, StringFormat=last read {0:HH:mm:ss}}"
+                                           Style="{StaticResource Label}" />
+                            </DockPanel>
+                            <Grid Margin="0,10,0,0" Height="196">
+                                <ListView x:Name="RequestsList"
+                                          ItemsSource="{Binding Recent}"
+                                          ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                          ScrollViewer.VerticalScrollBarVisibility="Hidden">
+                                    <ListView.View>
+                                        <GridView>
+                                            <GridViewColumn Header="id" Width="86" DisplayMemberBinding="{Binding Id}" />
+                                            <GridViewColumn Header="api" Width="70" DisplayMemberBinding="{Binding Path}" />
+                                            <GridViewColumn Header="tok/s" Width="64" DisplayMemberBinding="{Binding DecodeTokS, StringFormat={}{0:0.0}}" />
+                                            <GridViewColumn Header="prompt" Width="72" DisplayMemberBinding="{Binding PromptTokens}" />
+                                            <GridViewColumn Header="reused" Width="72" DisplayMemberBinding="{Binding Reused}" />
+                                            <GridViewColumn Header="out" Width="58" DisplayMemberBinding="{Binding OutputTokens}" />
+                                            <GridViewColumn Header="ttft" Width="66" DisplayMemberBinding="{Binding TtftS, StringFormat={}{0:0.00}s}" />
+                                            <GridViewColumn Header="hit" Width="56" DisplayMemberBinding="{Binding HitRate, StringFormat={}{0:P0}}" />
+                                            <GridViewColumn Header="finish" Width="96" DisplayMemberBinding="{Binding Finish}" />
+                                        </GridView>
+                                    </ListView.View>
+                                </ListView>
+                                <TextBlock Margin="20,34,20,16"
+                                           Text="nothing yet — this table fills up as requests reach the server">
+                                    <TextBlock.Style>
+                                        <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource EmptyNote}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ElementName=RequestsList, Path=HasItems}"
+                                                             Value="False">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- right column: model, models, warnings, where it lives. Scrollable like the left one, or the
+                 cards below the fold are unreachable at a small window height. -->
+            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,2,16">
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="Model" Style="{StaticResource CardTitle}" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding VersionText}" Style="{StaticResource Label}" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding Status.ModelName}" TextWrapping="Wrap" FontSize="15"
+                                       Foreground="{DynamicResource TextPrimary}" Margin="0,10,0,0"
+                                       Visibility="{Binding Status.Loaded, Converter={x:Static cv:BoolToVisibility.Instance}}" />
+                            <TextBlock Text="{Binding KvText}" Style="{StaticResource Label}" Margin="0,4,0,0"
+                                       Visibility="{Binding Status.Loaded, Converter={x:Static cv:BoolToVisibility.Instance}}" />
+                            <TextBlock Text="nothing loaded — Load below, or double-click a model in the list"
+                                       Style="{StaticResource EmptyNote}" HorizontalAlignment="Left"
+                                       TextAlignment="Left" Margin="0,10,0,10"
+                                       Visibility="{Binding Status.Loaded, Converter={x:Static cv:NotBoolToVisibility.Instance}}" />
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <Button Content="Load" Command="{Binding LoadCommand}" Margin="0,0,8,0" />
+                                <Button Content="Unload" Command="{Binding UnloadCommand}" Margin="0,0,8,0" />
+                                <Button Content="Open /health" Command="{Binding OpenApiCommand}"
+                                        ToolTip="The raw JSON the panel is built from" />
+                            </StackPanel>
+                            <Button Content="Check for a newer basalt" Margin="0,12,0,0" Click="CheckUpdate_Click" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="Models" Style="{StaticResource CardTitle}" />
+                                <TextBlock DockPanel.Dock="Right" Text="double-click to load" Style="{StaticResource Label}" />
+                            </DockPanel>
+                            <Grid Margin="0,10,0,0" Height="172">
+                                <ListBox x:Name="ModelsList" ItemsSource="{Binding ModelRows}"
+                                         MouseDoubleClick="ModelDouble_Click">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="2,2">
+                                                <TextBlock Text="{Binding Id}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Detail}" Style="{StaticResource Label}"
+                                                           TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock Margin="16" Text="{Binding ModelsEmptyText}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource EmptyNote}">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ElementName=ModelsList, Path=HasItems}"
+                                                             Value="False">
+                                                    <Setter Property="Visibility" Value="Visible" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Grid>
+                            <DockPanel Margin="0,12,0,0" LastChildFill="True">
+                                <Button DockPanel.Dock="Right" Content="Switch" Click="SwitchModel_Click"
+                                        IsEnabled="{Binding IsConnected}"
+                                        Margin="8,0,0,0" MinWidth="70"
+                                        ToolTip="Switch the server to the selected model" />
+                                <Button DockPanel.Dock="Left" Content="Find models online…" Click="BrowseModels_Click" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding ModelsFolderText}" Style="{StaticResource Label}"
+                                       Foreground="{DynamicResource TextFaint}" Margin="0,10,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0"
+                            Visibility="{Binding Warnings.Count, Converter={x:Static cv:CountToVisibility.Instance}}">
+                        <StackPanel>
+                            <TextBlock Text="Warnings" Style="{StaticResource CardTitle}"
+                                       Foreground="{DynamicResource Warn}" />
+                            <ItemsControl ItemsSource="{Binding Warnings}" Margin="0,8,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,0,0,5"
+                                                   Foreground="{DynamicResource Warn}" FontSize="12" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Address" Style="{StaticResource CardTitle}" />
+                            <TextBlock Text="{Binding Address}" Style="{StaticResource Mono}" Margin="0,8,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding ConfigPathText}" Style="{StaticResource Label}" Margin="0,8,0,0"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding ExePathText}" Style="{StaticResource Label}"
+                                       TextWrapping="Wrap" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- ============ console ============ -->
+        <Border Grid.Row="2" Margin="20,14,20,0" Style="{StaticResource Card}" Height="220">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" LastChildFill="False" Margin="0,0,0,8">
+                    <TextBlock DockPanel.Dock="Left" Text="Console" Style="{StaticResource CardTitle}" VerticalAlignment="Center" />
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Grid Width="200" VerticalAlignment="Center">
+                            <TextBox Text="{Binding LogFilter, UpdateSourceTrigger=PropertyChanged, Delay=250}"
+                                     Padding="26,5,8,5" VerticalContentAlignment="Center" />
+                            <TextBlock Style="{StaticResource Icon}" Margin="9,0,0,0" IsHitTestVisible="False"
+                                       Foreground="{DynamicResource TextFaint}" FontSize="12" Text="&#xE721;" />
+                        </Grid>
+                        <Button Content="Save…" Style="{StaticResource GhostButton}" Click="SaveLog_Click"
+                                Margin="8,0,0,0" ToolTip="Write the console to a text file" />
+                    </StackPanel>
+                </DockPanel>
+                <Grid>
+                    <!-- the console is a read-only document: select and copy any of it, but never edit it.
+                         Built line by line in code-behind from Vm.Log, colours and all. -->
+                    <FlowDocumentScrollViewer x:Name="LogView"
+                                              VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Hidden"
+                                              IsHitTestVisible="True"
+                                              Padding="2,0,0,0" />
+                    <TextBlock Text="no engine output yet — the console fills up as soon as a server starts talking"
+                               IsHitTestVisible="False">
+                        <TextBlock.Style>
+                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource EmptyNote}">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Log.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </Grid>
+            </DockPanel>
+        </Border>
+
+        <!-- ============ footer ============ -->
+        <DockPanel Grid.Row="3" LastChildFill="False" Margin="20,10,20,10">
+            <TextBlock DockPanel.Dock="Left" Text="{Binding UptimeText}" Style="{StaticResource Label}"
+                       Foreground="{DynamicResource TextFaint}" />
+            <TextBlock DockPanel.Dock="Left" Text="{Binding LastSeenText}" Style="{StaticResource Label}"
+                       Foreground="{DynamicResource TextFaint}" Margin="16,0,0,0" />
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Log.Count, StringFormat={}{0} lines}"
+                       Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}" />
+        </DockPanel>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

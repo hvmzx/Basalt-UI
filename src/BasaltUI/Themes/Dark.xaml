@@ -1,0 +1,53 @@
+<!--
+  Dark tokens: the whole palette of the app, one flat file of colours and nothing else.
+  Every style lives in Theme.xaml and reads these by DynamicResource, so the tokens are the only
+  place a colour is ever written. The names are roles, not RGB: a brush is named for the job it does.
+-->
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ground and elevation: the window is darkest, a card lifts off it, a control sits on the card -->
+    <SolidColorBrush x:Key="Window" Color="#0B0D10" />
+    <SolidColorBrush x:Key="Surface" Color="#14161B" />
+    <SolidColorBrush x:Key="SurfaceHi" Color="#1A1D23" />
+    <SolidColorBrush x:Key="ControlBg" Color="#24272E" />
+    <SolidColorBrush x:Key="ControlHover" Color="#2C3038" />
+    <SolidColorBrush x:Key="Field" Color="#0F1115" />
+
+    <!-- hairlines, for the few places a line is still worth drawing -->
+    <SolidColorBrush x:Key="Line" Color="#262930" />
+    <SolidColorBrush x:Key="LineHi" Color="#383C44" />
+
+    <!-- type -->
+    <SolidColorBrush x:Key="TextPrimary" Color="#F3F4F6" />
+    <SolidColorBrush x:Key="TextSecondary" Color="#9CA1AC" />
+    <SolidColorBrush x:Key="TextFaint" Color="#606571" />
+
+    <!-- the one voice of the app: a calm blue, spent only on the primary action, live data and focus -->
+    <SolidColorBrush x:Key="Accent" Color="#58A6FF" />
+    <SolidColorBrush x:Key="AccentHover" Color="#74B4FF" />
+    <SolidColorBrush x:Key="AccentDark" Color="#2E6BD6" />
+    <SolidColorBrush x:Key="AccentInk" Color="#0B1220" />
+    <SolidColorBrush x:Key="AccentSoft" Color="#15263A" />
+
+    <!-- data series that are not the accent -->
+    <SolidColorBrush x:Key="Slate" Color="#93A7C4" />
+
+    <!-- state -->
+    <SolidColorBrush x:Key="Warn" Color="#E2B340" />
+    <SolidColorBrush x:Key="Bad" Color="#F2685F" />
+    <SolidColorBrush x:Key="Good" Color="#43C078" />
+
+    <!-- state capsules: the fill is the state pushed almost to the ground, the word inside carries the colour -->
+    <SolidColorBrush x:Key="ReadyBg" Color="#16301F" />
+    <SolidColorBrush x:Key="BusyBg" Color="#15263A" />
+    <SolidColorBrush x:Key="WaitBg" Color="#33270D" />
+    <SolidColorBrush x:Key="StopBg" Color="#301A1C" />
+
+    <!-- destructive -->
+    <SolidColorBrush x:Key="DangerBg" Color="#2B1B1E" />
+    <SolidColorBrush x:Key="DangerBgHover" Color="#382326" />
+    <SolidColorBrush x:Key="DangerLine" Color="#42282A" />
+    <SolidColorBrush x:Key="DangerText" Color="#F2A5A0" />
+
+</ResourceDictionary>

@@ -1,0 +1,151 @@
+﻿usage: server.py [-h] [--mock-engine] [--model MODEL] [--alias ALIAS]
+                 [--parallel N] [--slot-full-context] [--config FILE]
+                 [--vision [MODE|GPU]] [--image-url-host HOST[:PORT]]
+                 [--image-dir DIR] [--image-remote-only] [--host HOST]
+                 [--script SCRIPT] [--port PORT] [--gpu GPU]
+                 [--tokenizer TOKENIZER] [--open] [--fit-max-tokens]
+                 [--grammar | --no-grammar] [--api-key API_KEY]
+                 [--allowed-host NAME] [--cors-origin ORIGIN]
+                 [--max-payload-mib MIB] [--debug] [--request-lines] [--lazy]
+                 [--idle-unload SECONDS] [--idle-sleep SECONDS]
+                 [--temperature N] [--top-p N] [--top-k N] [--min-p N]
+                 [--presence-penalty N] [--frequency-penalty N]
+                 [--repetition-penalty N] [--penalty-last-n N] [--seed N]
+                 [--min-free-vram-mib MIN_FREE_VRAM_MIB]
+                 [--reasoning-budget-tokens N] [--thinking-loop-tokens N]
+                 [--answer-room | --no-answer-room]
+
+Server settings: the command-line parser, the --config file and engine flag checks.
+
+options:
+  -h, --help            show this help message and exit
+  --mock-engine         run a scripted engine instead of the model, for
+                        clients and tests (no --model needed)
+  --model MODEL         the .basalt model file: the engine, tokenizer,
+                        sampling and vision come from it
+  --alias ALIAS         the model name the API reports (default: the name
+                        stored in the model file)
+  --parallel N          requests served at once, 1..8 (default 1: one at a
+                        time); more requests wait their turn. --max-context is
+                        shared: each slot holds that divided by N (so 4 slots
+                        of 262144 need --max-context 1048576, or --slot-full-
+                        context). The slots' KV cache comes out of the expert
+                        cache
+  --slot-full-context   with --parallel, give every slot the whole --max-
+                        context instead of an equal part: N slots cost N times
+                        the KV cache
+  --config FILE         a JSON file {"server": {...}, "engine": {...},
+                        "models": [{"model": FILE, ...}]}: settings named
+                        without the dashes. "server" holds what the server
+                        shares, "engine" what applies to every model that
+                        takes it, a model entry that model's own; a list gives
+                        a flag several values; the command line wins over it,
+                        for every model
+  --vision [MODE|GPU]   image input: off (default), dynamic (inside the
+                        engine: it borrows expert-cache slots on the main GPU
+                        while it reads an image, no standing VRAM), cpu (no
+                        VRAM, slow) or a GPU number, as nvidia-smi numbers
+                        them: the encoder sidecar, always on that card
+  --image-url-host HOST[:PORT]
+                        let requests from other machines name http(s) image
+                        URLs on exactly this host (repeatable; without a port,
+                        80 and 443). A name must resolve to public addresses;
+                        an IP address is taken as written. Requests from this
+                        machine need no flag
+  --image-dir DIR       let requests from other machines name image files
+                        under this directory (repeatable). Requests from this
+                        machine need no flag
+  --image-remote-only   treat requests from this machine as remote too, so
+                        they get only data: URLs and what --image-url-host and
+                        --image-dir allow. For a server behind anything on
+                        this machine that forwards other people's requests
+  --host HOST           the address to listen on: 127.0.0.1 = this PC only
+                        (the default), 0.0.0.0 = also other devices on your
+                        network (give --api-key)
+  --script SCRIPT       the mock engine's answer (default: a short greeting);
+                        given more than once, requests get them in turn and
+                        the last one repeats
+  --port PORT           the TCP port to listen on (default 8080)
+  --gpu GPU             the GPUs to use, as nvidia-smi numbers them: exactly
+                        these, the first is the main card and the engine gives
+                        the rest their roles ("0,1"); auto = every Blackwell
+                        card, the fastest as main (default: GPU 0 alone)
+  --tokenizer TOKENIZER
+                        tokenizer directory for the mock engine (a byte
+                        tokenizer if absent)
+  --open                open the local page in the browser once the model is
+                        ready
+  --fit-max-tokens      clamp max_tokens to the remaining context instead of
+                        rejecting the request with 400
+  --grammar, --no-grammar
+                        hold every tool call and JSON response format to a
+                        grammar in the engine (on by default; a request with
+                        strict: true gets it either way); --no-grammar turns
+                        it off
+  --api-key API_KEY     require this key on /v1/* (Authorization: Bearer ...
+                        or x-api-key); command line only, not allowed in a
+                        --config file
+  --allowed-host NAME   also answer to this Host name (repeatable; "*" turns
+                        the check off)
+  --cors-origin ORIGIN  let web pages from this origin use /v1/* (repeatable)
+  --max-payload-mib MIB
+                        the largest request body the server reads, in MiB; a
+                        bigger one gets a 413 (default 256)
+  --debug               log one line per request and the raw model text after
+                        each reply
+  --request-lines       echo the engine's per-request summary on stdout, for a
+                        supervisor that only sees this output
+  --lazy                start the API unloaded; load on first request; a
+                        sidecar image encoder is dropped, --vision dynamic
+                        stays
+  --idle-unload SECONDS
+                        unload the model after this many seconds without
+                        requests; the next request loads it again
+  --idle-sleep SECONDS  put the model to sleep after this many seconds without
+                        requests: its VRAM is freed, its RAM copy,
+                        conversations and learned expert placement stay, and
+                        the next request wakes it in a few seconds (Linux; the
+                        driver suspends the engine's GPU state)
+  --temperature N       default temperature for requests that leave it out,
+                        over the model file's: 0 = greedy; higher is more
+                        random
+  --top-p N             default top_p for requests that leave it out, over the
+                        model file's: nucleus cutoff, 0 < value <= 1 (1 = off)
+  --top-k N             default top_k for requests that leave it out, over the
+                        model file's: keep the K likeliest tokens (0 = off:
+                        every token)
+  --min-p N             default min_p for requests that leave it out, over the
+                        model file's: drop tokens less likely than this times
+                        the likeliest, 0..1 (0 = off)
+  --presence-penalty N  default presence_penalty for requests that leave it
+                        out, over the model file's: flat penalty on a token
+                        seen in the window
+  --frequency-penalty N
+                        default frequency_penalty for requests that leave it
+                        out, over the model file's: penalty growing with how
+                        often a token was seen
+  --repetition-penalty N
+                        default repetition_penalty for requests that leave it
+                        out, over the model file's: multiplicative penalty on
+                        seen tokens, > 0 (1 = off)
+  --penalty-last-n N    default penalty_last_n for requests that leave it out,
+                        over the model file's: the window the penalties look
+                        back over, in tokens (at most 4096)
+  --seed N              default seed for requests that leave it out, over the
+                        model file's: fix the random draw, an integer
+  --min-free-vram-mib MIN_FREE_VRAM_MIB
+                        load an unloaded model only when this much VRAM is
+                        free, else answer 503
+  --reasoning-budget-tokens N
+                        default thinking budget for requests that leave
+                        reasoning_budget_tokens out (0 = none): at the budget
+                        the thinking is closed and the answer starts, so set
+                        it below the request's max_tokens
+  --thinking-loop-tokens N
+                        end the thinking and let the model answer when it
+                        repeats one token this many times in a row inside the
+                        thinking (0 = never)
+  --answer-room, --no-answer-room
+                        reserve space for closing the thinking and the answer
+                        when the output cap is at least 1024 tokens; an
+                        explicit request budget of 0 opts out

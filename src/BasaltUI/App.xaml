@@ -1,0 +1,14 @@
+<Application x:Class="BasaltUI.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- The tokens (dark by default; App picks light when Windows says so) and then the one
+                     shared style set, which reads the tokens by DynamicResource. -->
+                <ResourceDictionary Source="pack://application:,,,/Themes/Dark.xaml" />
+                <ResourceDictionary Source="pack://application:,,,/Themes/Theme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

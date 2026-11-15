@@ -1,0 +1,54 @@
+<!--
+  WebUiWindow.xaml — the engine's own dashboard, hosted in the app instead of thrown at a browser the
+  user may never see come up. Chromium via WebView2 (the runtime ships with Windows 11; the package is
+  only the managed interface), so the page runs exactly as it does in a real browser.
+-->
+<Window x:Class="BasaltUI.WebUiWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Web UI — basalt"
+        Width="1180" Height="800" MinWidth="720" MinHeight="480"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        Background="{StaticResource Window}"
+        Foreground="{StaticResource TextPrimary}"
+        FontFamily="{StaticResource FontText}" FontSize="13"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        ShowInTaskbar="False">
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="44" ResizeBorderThickness="8,8,8,8" GlassFrameThickness="0"
+                            CornerRadius="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="44" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" LastChildFill="True" Margin="16,0,8,0" Background="Transparent">
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="Web UI" Style="{StaticResource Big}" FontSize="15" VerticalAlignment="Center" />
+                <TextBlock x:Name="UrlText" Style="{StaticResource Mono}" Foreground="{DynamicResource TextFaint}"
+                           VerticalAlignment="Center" Margin="14,1,0,0" TextTrimming="CharacterEllipsis"
+                           MaxWidth="480" />
+            </StackPanel>
+
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                        shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button Style="{StaticResource CaptionButton}" Content="&#xE72C;" Click="Reload_Click"
+                        ToolTip="Reload the page" />
+                <Button Style="{StaticResource CaptionCloseButton}" Content="&#xE8BB;" Click="Close_Click"
+                        ToolTip="Close" />
+            </StackPanel>
+        </DockPanel>
+
+        <!-- the default background keeps the window dark while the first page load paints itself -->
+        <wv2:WebView2 x:Name="Browser" Grid.Row="1"
+                      DefaultBackgroundColor="#0B0D10" />
+    </Grid>
+</Window>

@@ -1,0 +1,370 @@
+<!--
+  SettingsPage.xaml — settings as a page inside the main window, not a second window over it. The
+  header row (path, dirty flag, Save) sits under the window's own header, which carries the back
+  arrow; everything below is the form, the models, the raw JSON.
+-->
+<UserControl x:Class="BasaltUI.SettingsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:cv="clr-namespace:BasaltUI.Converters"
+             Background="{x:Null}"
+             Foreground="{StaticResource TextPrimary}"
+             FontFamily="{StaticResource FontText}" FontSize="13"
+             UseLayoutRounding="True"
+             TextOptions.TextFormattingMode="Display">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="44" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ============ which file we are editing, and whether it has changed ============ -->
+        <DockPanel Grid.Row="0" LastChildFill="False" Margin="20,0,20,0" Background="Transparent">
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock x:Name="PathText" Text="config" Style="{StaticResource Mono}"
+                           Foreground="{DynamicResource TextFaint}" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxWidth="560" />
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock x:Name="DirtyText" Text="" Foreground="{DynamicResource Warn}"
+                           VerticalAlignment="Center" Margin="0,0,12,0" />
+                <Button x:Name="RevertButton" Content="Revert" Click="Revert_Click" Margin="0,0,8,0" />
+                <Button x:Name="SaveButton" Content="Save config" Style="{StaticResource AccentButton}"
+                        Click="Save_Click" MinWidth="104" />
+            </StackPanel>
+        </DockPanel>
+
+        <!-- ============ the tabs ============ -->
+        <TabControl Grid.Row="1" x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged" Margin="20,0,20,0">
+            <TabItem Header="Basalt" />
+            <TabItem Header="Models" />
+            <TabItem Header="Server" />
+            <TabItem Header="Engine defaults" />
+            <TabItem Header="Raw JSON" />
+        </TabControl>
+
+        <!-- ============ the tab pages, kept out of the TabControl so the tab strip stays a hairline strip ============ -->
+        <Grid Grid.Row="2" Margin="20,0,20,0">
+            <Grid x:Name="PageBasalt" Visibility="Collapsed">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel MaxWidth="880" HorizontalAlignment="Left" Margin="2,16,14,20">
+                        <TextBlock Text="PROGRAM AND FILES" Style="{StaticResource Label}" FontSize="11"
+                                   Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,2,0,10" />
+
+                        <Grid Margin="0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="basalt.exe" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="ExeBox" Grid.Column="1" Margin="0,0,10,0" />
+                            <Button Grid.Column="2" Content="Browse…" Click="BrowseExe_Click" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="config file" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="ConfigBox" Grid.Column="1" Margin="0,0,10,0" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                <Button Content="Browse…" Margin="0,0,8,0" Click="BrowseConfig_Click" />
+                                <Button Content="New…" Click="NewConfig_Click" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,10,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="models folder" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="ModelsFolderBox" Grid.Column="1" Margin="0,0,10,0" />
+                            <Button Grid.Column="2" Content="Browse…" Click="BrowseModels_Click" />
+                        </Grid>
+
+                        <Grid Margin="0,14,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="extra arguments" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="ExtraBox" Grid.Column="1" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="api key" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <PasswordBox x:Name="KeyBox" Grid.Column="1" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                                   Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Text="basalt refuses an api key inside the config file, so it lives here and is passed as --api-key. Leave it empty on a machine you trust." />
+
+                        <Border Style="{StaticResource Card}" Margin="0,16,0,0" Padding="16,12">
+                            <StackPanel>
+                                <DockPanel LastChildFill="False">
+                                    <TextBlock DockPanel.Dock="Left" Text="Command line" Style="{StaticResource CardTitle}" />
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                            Content="Copy" Click="CopyCommandLine_Click" />
+                                </DockPanel>
+                                <TextBlock x:Name="PreviewText" Style="{StaticResource Mono}" Margin="0,8,0,0"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" />
+                                <TextBlock Text="basalt always starts as: serve --config &lt;file&gt;. Anything else the engine takes can go in extra arguments above."
+                                           Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                                           Margin="0,8,0,0" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <TextBlock Text="STARTUP AND TRAY" Style="{StaticResource Label}" FontSize="11"
+                                   Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,22,0,8" />
+                        <CheckBox x:Name="AutostartCheck" Content="Start Basalt UI when Windows starts" Margin="0,4" />
+                        <CheckBox x:Name="StartOnLaunchCheck" Content="Start basalt as soon as Basalt UI opens" Margin="0,4" />
+                        <CheckBox x:Name="StartMinimisedCheck" Content="Open hidden in the tray" Margin="0,4" />
+                        <CheckBox x:Name="TrayOnCloseCheck" Content="Close button hides to the tray instead of quitting" Margin="0,4" />
+                        <CheckBox x:Name="StopOnExitCheck" Content="Stop basalt when Basalt UI quits" Margin="0,4" />
+                        <CheckBox x:Name="OpenWebCheck" Content="Open the web UI in the browser the first time the server answers" Margin="0,4" />
+
+                        <Grid Margin="0,14,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="120" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="stop grace, seconds" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="GraceBox" Grid.Column="1" HorizontalAlignment="Left" MinWidth="76" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Label}" Margin="12,0,0,0" TextWrapping="Wrap"
+                                       VerticalAlignment="Center"
+                                       Text="How long to wait for a clean Ctrl+C shutdown before forcing the process down. Big models need a moment to flush." />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="120" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="refresh, ms" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="PollBox" Grid.Column="1" HorizontalAlignment="Left" MinWidth="76" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Label}" Margin="12,0,0,0" TextWrapping="Wrap"
+                                       VerticalAlignment="Center"
+                                       Text="How often to ask /health and /metrics; charts update every second read." />
+                        </Grid>
+
+                        <TextBlock Text="A NEWER BASALT" Style="{StaticResource Label}" FontSize="11"
+                                   Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,22,0,8" />
+                        <CheckBox x:Name="CheckUpdatesCheck" Content="Ask GitHub whether a newer basalt is out" Margin="0,4" />
+                        <TextBlock x:Name="UpdateFoot" Style="{StaticResource Label}" Margin="0,6,0,0"
+                                   TextWrapping="Wrap" />
+                        <DockPanel Margin="0,6,0,0" LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
+                                <Button x:Name="CheckNowButton" Content="Check now" Click="CheckNow_Click" />
+                                <Button x:Name="BringBackButton" Content="Ask about it again" Click="BringBack_Click"
+                                        Margin="8,0,0,0" Visibility="Collapsed" />
+                            </StackPanel>
+                            <TextBlock DockPanel.Dock="Right" x:Name="DismissFoot" Style="{StaticResource Label}"
+                                       VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="380" />
+                        </DockPanel>
+                        <TextBlock x:Name="UpdateProblemText" Style="{StaticResource Label}" Margin="0,6,0,0"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource Warn}" />
+
+                        <TextBlock Text="DOWNLOADS" Style="{StaticResource Label}" FontSize="11"
+                                   Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,22,0,8" />
+                        <Grid Margin="0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="140" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="parallel connections" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="ConnectionsBox" Grid.Column="1" HorizontalAlignment="Left" MinWidth="76" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Label}" Margin="12,0,0,0" TextWrapping="Wrap"
+                                       VerticalAlignment="Center"
+                                       Text="A big file arrives in byte ranges on several connections at once, which is what makes it fast — and what lets an interrupted download carry on. 8 is a good number." />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="hugging face mirror" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="MirrorBox" Grid.Column="1" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                                   Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Text="Empty means huggingface.co itself. A mirror closer to you can be several times faster; some networks need one to reach the files at all." />
+
+                        <Grid Margin="0,10,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="proxy" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                            <TextBox x:Name="ProxyBox" Grid.Column="1" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                                   Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Text="Only for the outside world — GitHub and Hugging Face. Empty uses whatever Windows is told to use. The basalt server on this machine is never sent through a proxy." />
+
+                        <DockPanel Margin="0,18,0,0">
+                            <Button Content="Open settings folder" Click="OpenAppFolder_Click" HorizontalAlignment="Left" />
+                            <TextBlock Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                                       Margin="12,0,0,0" TextWrapping="Wrap"
+                                       VerticalAlignment="Center"
+                                       Text="Basalt UI keeps its own settings and a timestamped backup of every config save here — not next to basalt." />
+                        </DockPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </Grid>
+
+            <Grid x:Name="PageModels" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="225" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <DockPanel Grid.Column="0" Margin="0,16,0,16">
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Add" HorizontalAlignment="Stretch" Click="AddModel_Click" />
+                            <Button Grid.Column="2" Content="Duplicate" HorizontalAlignment="Stretch" Click="DuplicateModel_Click" />
+                        </Grid>
+                        <Button Content="Remove" Margin="0,8,0,0" HorizontalAlignment="Stretch" Click="RemoveModel_Click" />
+                        <Button Content="Find models on Hugging Face…" HorizontalAlignment="Stretch"
+                                Margin="0,12,0,0" Click="FindModels_Click" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="models in this config" Style="{StaticResource Label}"
+                               Margin="0,0,0,8" />
+                    <ListBox x:Name="ModelsList" SelectionChanged="ModelsList_SelectionChanged" />
+                </DockPanel>
+
+                <DockPanel Grid.Column="2" Margin="0,16,0,16">
+                    <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left" Text="Add a field" Style="{StaticResource Label}"
+                                       VerticalAlignment="Center" />
+                            <Button DockPanel.Dock="Right" Content="Add to this model" Click="AddField_Click" />
+                            <ComboBox x:Name="AddFieldCombo" DockPanel.Dock="Right" Width="330" Margin="0,0,8,0" />
+                        </DockPanel>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" x:Name="ModelHint" Style="{StaticResource Label}"
+                               Margin="0,0,0,8" TextWrapping="Wrap" />
+                    <Border x:Name="PreviewCard" DockPanel.Dock="Bottom" Style="{StaticResource Card}"
+                            Padding="16,12" Margin="0,10,0,0" Visibility="Collapsed">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="load preview — how it would sit on this machine"
+                                           Style="{StaticResource CardTitle}" />
+                            </DockPanel>
+                            <TextBlock x:Name="PreviewVerdict" Margin="0,6,0,0" TextWrapping="Wrap"
+                                       FontWeight="SemiBold" />
+                            <StackPanel x:Name="PreviewRows" Margin="0,8,0,0" />
+                            <TextBlock x:Name="PreviewNote" Style="{StaticResource Label}"
+                                       Foreground="{DynamicResource TextFaint}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="ModelFields" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
+
+            <Grid x:Name="PageServer" Visibility="Collapsed">
+                <DockPanel Margin="0,16,0,16">
+                    <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left" x:Name="ServerNote" Text="Address the server listens on."
+                                       Style="{StaticResource Label}" TextWrapping="Wrap" MaxWidth="560" VerticalAlignment="Center" />
+                            <Button DockPanel.Dock="Right" Content="Add" Click="AddServerField_Click" />
+                            <ComboBox x:Name="AddServerFieldCombo" DockPanel.Dock="Right" Width="300" Margin="0,0,8,0" />
+                        </DockPanel>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="ServerFields" MaxWidth="780" HorizontalAlignment="Left" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
+
+            <Grid x:Name="PageEngine" Visibility="Collapsed">
+                <DockPanel Margin="0,16,0,16">
+                    <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="Defaults for every model. A field set on a single model wins over the same field here."
+                                       Style="{StaticResource Label}" TextWrapping="Wrap" MaxWidth="560" VerticalAlignment="Center" />
+                            <Button DockPanel.Dock="Right" Content="Add" Click="AddEngineField_Click" />
+                            <ComboBox x:Name="AddEngineFieldCombo" DockPanel.Dock="Right" Width="300" Margin="0,0,8,0" />
+                        </DockPanel>
+                    </Border>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="EngineFields" MaxWidth="780" HorizontalAlignment="Left" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
+
+            <Grid x:Name="PageRaw" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,14,0,10">
+                    <Button DockPanel.Dock="Left" Content="Reformat" Click="Reformat_Click" Margin="0,0,8,0" />
+                    <Button DockPanel.Dock="Left" Content="Check" Click="Check_Click" />
+                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource Label}" VerticalAlignment="Center"
+                               Margin="14,0,0,0"
+                               Text="edits here are what Save writes — unknown keys are kept" />
+                    <Button DockPanel.Dock="Right" Content="Apply to the form" Click="ApplyRaw_Click" />
+                </DockPanel>
+
+                <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0">
+                    <TextBox x:Name="RawBox" Margin="0"
+                             Background="Transparent" BorderThickness="0"
+                             AcceptsReturn="True" AcceptsTab="True"
+                             FontFamily="{StaticResource FontMono}" FontSize="12.5"
+                             Padding="12,10"
+                             TextWrapping="NoWrap"
+                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             VerticalContentAlignment="Stretch"
+                             IsUndoEnabled="True" />
+                </Border>
+
+                <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,16" Padding="14,10">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top" Text="Problems" Style="{StaticResource CardTitle}" Margin="0,0,0,6" />
+                        <ListBox x:Name="IssuesList" BorderThickness="0" Background="Transparent" />
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <Border Grid.Row="3" BorderBrush="{DynamicResource Line}" BorderThickness="0,1,0,0"
+                Margin="20,12,20,0" Padding="0,10,0,10">
+            <DockPanel LastChildFill="False">
+                <CheckBox x:Name="RestartAfterSaveCheck" DockPanel.Dock="Left" Content="Restart basalt after saving"
+                          VerticalAlignment="Center" />
+                <TextBlock DockPanel.Dock="Right" x:Name="FootText" Style="{StaticResource Label}"
+                           VerticalAlignment="Center" Text="basalt reads the config only when it starts" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>

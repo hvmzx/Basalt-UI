@@ -1,0 +1,334 @@
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Media;
+using BasaltUI.Core;
+using BasaltUI.ViewModels;
+using Microsoft.Win32;
+
+namespace BasaltUI;
+
+public partial class MainWindow : Window
+{
+    private readonly App app;
+    private MainViewModel Vm => app.Vm;
+
+    private FlowDocument logDocument = null!;
+    private ScrollViewer? logScroller;
+    private bool followTail = true;
+    private bool toldAboutTray;
+
+    public MainWindow(App app)
+    {
+        this.app = app;
+        InitializeComponent();
+        DataContext = Vm;
+
+        ApplySavedBounds();
+        SourceInitialized += (_, _) =>
+        {
+            ApplySavedBounds();
+            Shell.Win11.Round(this, App.IsDarkTheme);
+        };
+
+        // The console: a read-only document — select and copy anything, edit nothing. Lines are appended
+        // as they arrive so the document mirrors Vm.Log without re-measuring the whole history each time.
+        logDocument = new FlowDocument
+        {
+            PagePadding = new Thickness(0),
+            ColumnWidth = double.PositiveInfinity,          // one column, as wide as the pane
+            FontFamily = (FontFamily)TryFindResource("FontMono")!,
+            FontSize = 12,
+        };
+        LogView.Document = logDocument;
+        LogView.Loaded += (_, _) =>
+        {
+            logScroller = FindScrollViewer(LogView);
+            if (logScroller is not null)
+                logScroller.ScrollChanged += (_, _) =>
+                    followTail = logScroller.ScrollableHeight - logScroller.VerticalOffset < 24;
+        };
+        foreach (var line in Vm.Log)
+            logDocument.Blocks.Add(LineFor(line));
+
+        Vm.Log.CollectionChanged += OnLogChanged;
+        Vm.ModelsBrowserRequested += app.ShowModelsBrowser;
+        Vm.WebUiRequested += app.ShowWebUi;
+    }
+
+    // ---- geometry ------------------------------------------------------------------------------------------
+    private void ApplySavedBounds()
+    {
+        var s = app.Settings;
+        if (s.WindowLeft is not { } savedLeft || s.WindowTop is not { } savedTop)
+            return;
+
+        // a monitor that used to exist is the usual reason for an off-screen window
+        var left = Math.Max(SystemParameters.VirtualScreenLeft, Math.Min(savedLeft,
+                       SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 120));
+        var top = Math.Max(SystemParameters.VirtualScreenTop, Math.Min(savedTop,
+                      SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 80));
+
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = left;
+        Top = top;
+        Width = Math.Clamp(s.WindowWidth, MinWidth, SystemParameters.VirtualScreenWidth);
+        Height = Math.Clamp(s.WindowHeight, MinHeight, SystemParameters.VirtualScreenHeight);
+    }
+
+    // ---- pages: the dashboard, and settings / release notes over it -----------------------------------------
+    private bool onSettings;
+    private bool onNotes;
+
+    private void ShowPage(bool main, string? title = null)
+    {
+        onSettings = !main && title == "Settings";
+        onNotes = !main && title != "Settings";
+        if (onSettings)
+            SettingsPanel.OnShown();
+        SettingsPanel.Visibility = main ? Visibility.Collapsed : (onSettings ? Visibility.Visible : Visibility.Collapsed);
+        NotesPage.Visibility = main ? Visibility.Collapsed : (onNotes ? Visibility.Visible : Visibility.Collapsed);
+        PageMain.Visibility = main ? Visibility.Visible : Visibility.Collapsed;
+        MainTitle.Visibility = main ? Visibility.Visible : Visibility.Collapsed;
+        MainActions.Visibility = main ? Visibility.Visible : Visibility.Collapsed;
+        PageTitle.Visibility = main ? Visibility.Collapsed : Visibility.Visible;
+        if (!main)
+            PageTitleText.Text = title;
+    }
+
+    /// <summary>The window is one window: settings is a page over the dashboard, and the arrow takes you back.</summary>
+    public void OpenSettings() => ShowPage(false, "Settings");
+
+    /// <summary>The release notes, the same kind of page: read in the app, the arrow takes you back.</summary>
+    public void OpenNotes(BasaltRelease release)
+    {
+        NotesPage.Show(app, release);
+        ShowPage(false, "Release notes");
+    }
+
+    private void Back_Click(object sender, RoutedEventArgs e)
+    {
+        if (onSettings && !SettingsPanel.TryLeave())
+            return;
+        ShowPage(true);
+    }
+
+    // ---- the window's own chrome buttons ---------------------------------------------------------------------
+    private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
+
+    private void Maximize_Click(object sender, RoutedEventArgs e)
+        => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void Close_Click(object sender, RoutedEventArgs e) => Close();
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        if (MaxButton is not null)
+            MaxButton.Content = WindowState == WindowState.Maximized ? "\uE923" : "\uE922";
+    }
+
+    // ---- closing ------------------------------------------------------------------------------------------
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (!app.WindowMayClose())
+        {
+            e.Cancel = true;
+            Hide();
+            if (!toldAboutTray)
+            {
+                toldAboutTray = true;
+                Vm.Append("app: hidden to the tray — right-click the icon to stop basalt or quit", LogSource.App);
+            }
+            return;
+        }
+        base.OnClosing(e);
+    }
+
+    // ---- the log pane --------------------------------------------------------------------------------------
+    private void OnLogChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        switch (e.Action)
+        {
+            case NotifyCollectionChangedAction.Add:
+                if (e.NewItems is null)
+                    return;
+                foreach (LogLine line in e.NewItems)
+                    logDocument.Blocks.Add(LineFor(line));
+                break;
+
+            case NotifyCollectionChangedAction.Remove:
+                if (e.OldItems is null)
+                    return;
+                for (var i = 0; i < e.OldItems.Count; i++)
+                {
+                    if (logDocument.Blocks.FirstBlock is { } first)
+                        logDocument.Blocks.Remove(first);
+                }
+                break;
+
+            default:                                    // a filter change resets the collection
+                logDocument.Blocks.Clear();
+                foreach (var line in Vm.Log)
+                    logDocument.Blocks.Add(LineFor(line));
+                break;
+        }
+
+        if (followTail)
+            Dispatcher.BeginInvoke(() => logScroller?.ScrollToEnd());
+    }
+
+    private static ScrollViewer? FindScrollViewer(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer sv)
+                return sv;
+            if (FindScrollViewer(child) is { } found)
+                return found;
+        }
+        return null;
+    }
+
+    /// <summary>One console line: the faint mono time, then the text in the colour of its source.</summary>
+    private static Paragraph LineFor(LogLine line)
+    {
+        var paragraph = new Paragraph { Margin = new Thickness(0, 1, 0, 1) };
+        var time = new Run(line.At.ToString("HH:mm:ss") + "  ") { FontSize = 11 };
+        time.SetResourceReference(Run.ForegroundProperty, "TextFaint");
+        paragraph.Inlines.Add(time);
+        var text = new Run(line.Text);
+        text.SetResourceReference(Run.ForegroundProperty,
+            line.Source == LogSource.Error ? "Bad" :
+            line.Source == LogSource.App ? "Accent" : "TextSecondary");
+        paragraph.Inlines.Add(text);
+        return paragraph;
+    }
+
+    // ---- buttons ------------------------------------------------------------------------------------------
+    private void TakeOver_Click(object sender, RoutedEventArgs e) => Vm.TakeOverForeign();
+
+    private void IgnoreForeign_Click(object sender, RoutedEventArgs e) => Vm.IgnoreForeign();
+
+    private void SwitchModel_Click(object sender, RoutedEventArgs e) => SwitchSelected();
+
+    private void ModelDouble_Click(object sender, RoutedEventArgs e) => SwitchSelected();
+
+    private void SwitchSelected()
+    {
+        // A switch is an HTTP call to a server that has to be answering; with none there is nothing to
+        // tell, and the button beside this list is already showing that.
+        if (!Vm.IsConnected)
+            return;
+        if (ModelsList.SelectedItem is not ModelRow row)
+            return;
+        if (row.Status.Contains("loaded", StringComparison.OrdinalIgnoreCase))
+            return;
+        _ = Vm.SwitchModelAsync(row.Id);
+    }
+
+    // ---- a newer basalt ----------------------------------------------------------------------------------------
+    private async void Update_Click(object sender, RoutedEventArgs e)
+    {
+        // Whether a server has to be stopped, and whose it is, decides the wording. The plan is looked
+        // at again inside the update itself; this pass is only for putting the question honestly.
+        var plan = Vm.PeekUpdatePlan();
+        var tag = Vm.Latest?.Tag ?? "the new version";
+
+        if (plan.Blocked)
+        {
+            Shell.Dialog.Info(this, "Update basalt", plan.Question(tag));
+            return;
+        }
+
+        if (plan.Answers)
+        {
+            var what = plan.AskFirst
+                ? $"The server answering on port {plan.Port} (pid {plan.Pid}) was not started by Basalt UI, and Windows cannot replace its files while it runs.\n\n" +
+                  $"Basalt will be asked to stop politely (the Ctrl+C it listens for), {tag} will be put in place, and then you choose whether to start it again from here.\n\nContinue?"
+                : $"Basalt is going to be terminated so {tag} can be installed: the server stops, the new files go in, and then you choose whether to start it again.\n\nContinue?";
+            if (!Shell.Dialog.Confirm(this, "Update basalt", what))
+                return;
+        }
+
+        UpdateButton.IsEnabled = false;
+        DismissButton.IsEnabled = false;
+        var wasRunning = plan.Answers;
+        try
+        {
+            var error = await Vm.UpdateBasaltAsync();
+            if (error.Length > 0)
+            {
+                app.Notify("could not update basalt: " + error);
+                return;
+            }
+        }
+        finally
+        {
+            UpdateButton.IsEnabled = true;
+            DismissButton.IsEnabled = true;
+        }
+
+        // The update is done and the server, if there was one, is off. Starting again is the user's call.
+        if (wasRunning)
+        {
+            if (Shell.Dialog.Confirm(this, "Update installed", $"{tag} is installed. Start basalt again now?",
+                                     confirm: "Start again", cancel: "Not now"))
+                _ = Vm.StartAsync();
+        }
+        else
+            app.Notify($"{tag} is installed — press Start when you want it running");
+    }
+
+    /// <summary>The notes, as a page over the dashboard; the GitHub page stays reachable from inside it.</summary>
+    private void UpdateNotes_Click(object sender, RoutedEventArgs e)
+    {
+        if (Vm.Latest is { } release)
+            OpenNotes(release);
+        else
+            Vm.OpenReleasePage();   // the notes have not arrived yet; the page is still worth a try
+    }
+
+    private void DismissUpdate_Click(object sender, RoutedEventArgs e) => Vm.UpdateDismiss();
+
+    private async void CheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button button)
+            return;
+        button.IsEnabled = false;
+        try
+        {
+            await Vm.CheckForUpdateAsync(manual: true);
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
+    // ---- models on Hugging Face ---------------------------------------------------------------------------------
+    private void BrowseModels_Click(object sender, RoutedEventArgs e) => Vm.OpenModelsBrowser();
+
+    private void SaveLog_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Save the console",
+            Filter = "Text file|*.txt|All files|*.*",
+            FileName = $"basalt-{DateTime.Now:yyyyMMdd-HHmmss}.txt",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+        };
+        if (dialog.ShowDialog(this) != true)
+            return;
+
+        var error = Vm.SaveLogTo(dialog.FileName);
+        if (error.Length > 0)
+            app.Notify("could not save the log: " + error);
+        else
+            app.Notify("log saved to " + dialog.FileName);
+    }
+}
