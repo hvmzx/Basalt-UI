@@ -195,7 +195,8 @@ public sealed class MainViewModel : ObservableObject
             if (status.Models.Count > 1)
                 parts.Add(status.Models.Count + " models");
             if (status.Loaded && status.SlotsTotal > 0)
-                parts.Add(status.SlotsActive + "/" + status.SlotsTotal + " slots" + (status.Queued > 0 ? $" · {status.Queued} waiting" : ""));
+                parts.Add("requests " + status.SlotsActive + "/" + status.SlotsTotal +
+                          (status.Queued > 0 ? $" · {status.Queued} waiting" : ""));
             return string.Join("  ·  ", parts);
         }
     }
@@ -280,8 +281,8 @@ public sealed class MainViewModel : ObservableObject
     public string SpecText => status.Spec > 0 ? status.Spec + " draft tokens" : "no drafting";
     public string PcieText => status.PcieFrac > 0 ? "pcie " + status.PcieFrac.ToString("0.00") : "pcie idle";
     public string DiskText => status.DiskReadMb > 0.05 ? status.DiskReadMb.ToString("0.0") + " MB/s from disk" : "no reads";
-    public string QueueText => status.Queued + " queued · " + status.SlotsActive + "/" +
-                                (status.SlotsTotal > 0 ? status.SlotsTotal.ToString() : "?") + " slots";
+    public string QueueText => status.Queued + " queued · requests " + status.SlotsActive + "/" +
+                               (status.SlotsTotal > 0 ? status.SlotsTotal.ToString() : "?");
     public string LiveText => string.IsNullOrEmpty(status.LiveState) ? "—" : status.LiveState;
     public string EngineLine
     {
@@ -505,7 +506,9 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>Which of the release's files belongs here, and how big it is.</summary>
     public string UpdateAssetText => Latest?.WindowsAsset is { } asset
         ? asset.Name + " · " + asset.SizeText + (asset.Sha256.Length == 64 ? " · sha256 published" : "")
-        : "this release has no windows zip";
+        : Latest is { Assets.Count: 0 }
+            ? "the files are still going up for this release — the next look brings them"
+            : "this release has no windows zip";
 
     /// <summary>Why the last check did not answer at all, if it did not. Empty when we know a release.</summary>
     public string UpdateProblem => Latest is null ? updateSaying : "";
@@ -623,7 +626,10 @@ public sealed class MainViewModel : ObservableObject
     {
         if (checkingUpdate || !Settings.CheckForUpdates)
             return;
-        if (autoCheckDone && DateTime.UtcNow - Settings.LastUpdateCheckUtc < TimeSpan.FromHours(6))
+        // A release that was up but had no files yet was caught mid-publish: look again in minutes, not hours
+        var waiting = Latest is { Assets.Count: 0 };
+        var gap = waiting ? TimeSpan.FromMinutes(10) : TimeSpan.FromHours(6);
+        if (autoCheckDone && DateTime.UtcNow - Settings.LastUpdateCheckUtc < gap)
             return;
         autoCheckDone = true;
         _ = CheckForUpdateAsync(manual: false);
@@ -690,7 +696,9 @@ public sealed class MainViewModel : ObservableObject
     {
         var release = Latest;
         if (release?.WindowsAsset is null)
-            return "ask me again once the update check has answered";
+            return release is { Assets.Count: 0 }
+                ? $"the files for {release.Tag} are still going up — click the dot again in a few minutes"
+                : "this release has no windows zip — nothing of it belongs on this machine";
 
         var plan = PeekUpdatePlan();
         var wasRunning = false;
@@ -1313,6 +1321,7 @@ public sealed class MainViewModel : ObservableObject
 
         RebuildModels(snapshot);
         RebuildWarnings(snapshot);
+        MaybeProbeServed();      // the card's dedup asks the router what names it serves; answers may redraw it
     });
 
     private void RebuildRows(ServerStatus snapshot)
@@ -1333,12 +1342,14 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// What the card shows is the models folder: every local file, always — configured or not, served or
-    /// not, so a model cannot vanish the moment the config points at it. A configured file wears the state
-    /// of its served face, paired through the config: /v1/models lists the configured models in the
-    /// config's order, so while the counts agree the i-th row is the i-th entry's — how a pack name
-    /// ("Qwen3.8-Flash-Next UD-IQ3_XXS") ties to its file ("Qwen3.8-FN-UD-IQ3_XXS.basalt"), whose names
-    /// share nothing. Served models no local file accounts for keep their own rows.
+    /// What the card shows is the models folder: every local file, always, and each file only once. A file
+    /// the running server serves wears that server's own words for it — loaded, context, vision — tied to
+    /// the file by the config: the server's list is in the config's order, so while the counts agree the
+    /// i-th row is the i-th entry's, which is how a pack name ("Qwen3.8-Flash-Next UD-IQ3_XXS") ties to
+    /// its file ("Qwen3.8-FN-UD-IQ3_XXS.basalt"), whose names share nothing. When the counts do not agree
+    /// (the running server started with an older config), names pair what they can and the router itself
+    /// is asked for the rest: /metrics with a model name answers for a name one of its services serves,
+    /// without loading anything. Served models no local file accounts for keep their own rows.
     /// </summary>
     private void RebuildDisplay()
     {
@@ -1347,39 +1358,69 @@ public sealed class MainViewModel : ObservableObject
 
         var entries = status.Reachable ? getConfig()?.ModelEntries() : null;
         var paired = entries is not null && served.Count == entries.Count;
-        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // served ids a file row carries
 
-        foreach (var f in localModels)
+        var faces = new Dictionary<string, ModelRow>(StringComparer.OrdinalIgnoreCase);  // file -> its served face
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);             // served ids a file row carries
+
+        if (paired)
         {
-            ModelRow? face = null;
-            if (paired)
+            foreach (var f in localModels)
             {
                 for (var i = 0; i < entries!.Count; i++)
                 {
                     if (!SameModelFile(ConfigDocument.Text(entries[i], "model"), f.Name))
                         continue;
-                    face = served[i];
+                    faces[f.Name] = served[i];
+                    claimed.Add(served[i].Id);
                     break;
                 }
             }
-            else
-            {
-                // counts that do not agree: pair by name where the names agree, and let the rest show twice
-                face = served.FirstOrDefault(m => SameModelFile(m.Id, f.Name) ||
-                                                 Stem(m.Id).Equals(Stem(f.Name), StringComparison.OrdinalIgnoreCase));
-            }
+        }
 
+        var openFiles = new List<LocalModelRow>();
+        foreach (var f in localModels)
+        {
+            if (faces.ContainsKey(f.Name))
+                continue;
+            var byName = served.FirstOrDefault(m => SameModelFile(m.Id, f.Name) ||
+                                                    Stem(m.Id).Equals(Stem(f.Name), StringComparison.OrdinalIgnoreCase));
+            if (byName is not null)
+            {
+                faces[f.Name] = byName;
+                claimed.Add(byName.Id);
+                continue;
+            }
+            if (probedServed.TryGetValue(f.Name, out var serves) && serves)
+                openFiles.Add(f);
+        }
+
+        // the same order on both sides — the config's order drives the server's list — pairs the rest
+        var openServed = served.Where(m => !claimed.Contains(m.Id)).ToList();
+        if (openFiles.Count > 0 && openFiles.Count == openServed.Count)
+        {
+            var order = EntryOrder();
+            foreach (var f in openFiles.OrderBy(f => order.GetValueOrDefault(f.Name, int.MaxValue)))
+            {
+                var face = openServed[0];
+                openServed.RemoveAt(0);
+                faces[f.Name] = face;
+                claimed.Add(face.Id);
+            }
+        }
+
+        foreach (var f in localModels)
+        {
             string detail;
             var loaded = false;
-            if (face is { } m)
+            if (faces.TryGetValue(f.Name, out var m))
             {
-                claimed.Add(m.Id);
                 loaded = m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase);
-                detail = $"{f.Detail} · in the config — {m.Detail}";
+                detail = m.Detail;                          // loaded · 262,144 ctx · vision — the server's words
             }
             else
             {
-                detail = $"{f.Detail} · in the models folder";
+                var ctx = EntryContextOf(f.Name);
+                detail = f.Detail + (ctx > 0 ? $" · {ctx:N0} ctx" : "");
             }
             rows.Add(new HomeModelRow(f.Name, detail, Live: false, Loaded: loaded));
         }
@@ -1400,6 +1441,78 @@ public sealed class MainViewModel : ObservableObject
         foreach (var r in rows)
             DisplayModels.Add(r);
         Raise(nameof(ModelsEmptyText));
+    }
+
+    /// <summary>The context a file's config entry carries, when one points at the file at all.</summary>
+    private long EntryContextOf(string file)
+    {
+        var entry = getConfig()?.ModelEntries()
+            .FirstOrDefault(e => SameModelFile(ConfigDocument.Text(e, "model"), file));
+        return entry is null ? 0 : ConfigDocument.Int(entry, "max-context") ?? 0;
+    }
+
+    /// <summary>Each local file's place in the config, for pairing in the config's own order.</summary>
+    private Dictionary<string, int> EntryOrder()
+    {
+        var order = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var entries = getConfig()?.ModelEntries();
+        if (entries is null)
+            return order;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var name = Path.GetFileName(ConfigDocument.Text(entries[i], "model")?.Trim() ?? "");
+            if (name.Length > 0 && !order.ContainsKey(name))
+                order[name] = i;
+        }
+        return order;
+    }
+
+    // ---- what the running server serves, by its own word ------------------------------------------------------
+    // A pack's name shares nothing with its file's name, and the running server's config may not even be
+    // the one on disk now. For a file the pairing and the names both miss, the router is asked directly:
+    // /metrics with a model name answers 200 for a name one of its services serves, 404 for the rest —
+    // a read, never a load. One ask per file, refreshed now and then in case the server changed its mind.
+    private readonly Dictionary<string, bool> probedServed = new(StringComparer.OrdinalIgnoreCase);
+    private int probing;
+    private DateTime probesAt = DateTime.MinValue;
+
+    private void MaybeProbeServed()
+    {
+        if (!status.Reachable)
+        {
+            probedServed.Clear();
+            return;
+        }
+        if (Interlocked.CompareExchange(ref probing, 1, 0) != 0)
+            return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var refresh = DateTime.UtcNow - probesAt > TimeSpan.FromSeconds(30);
+                var changed = false;
+                foreach (var f in localModels.ToList())
+                {
+                    if (!refresh && probedServed.TryGetValue(f.Name, out var known) && known)
+                        continue;                       // a served file stays served until the next refresh
+                    var answer = await client.ServesAsync(f.Name);
+                    if (answer is null)
+                        continue;                       // no answer is not a no; ask again next beat
+                    probesAt = DateTime.UtcNow;
+                    if (!probedServed.TryGetValue(f.Name, out var old) || old != answer.Value)
+                    {
+                        probedServed[f.Name] = answer.Value;
+                        changed = true;
+                    }
+                }
+                if (changed)
+                    OnUi(RebuildDisplay);
+            }
+            finally
+            {
+                Interlocked.Exchange(ref probing, 0);
+            }
+        });
     }
 
     /// <summary>A name without its model-file extension, so a served id and a folder file can be matched.</summary>

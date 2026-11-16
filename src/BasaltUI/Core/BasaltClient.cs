@@ -209,6 +209,28 @@ public sealed class BasaltClient
     public async Task<HealthResult?> HealthAsync(CancellationToken ct = default)
         => await GetAsync("/health", HealthResult.Parse, withKey: false, ct: ct);
 
+    /// <summary>Does the running server answer to this name? GET /metrics with a model asks the router
+    /// exactly that, without loading anything: 200 for a name one of its services serves, 404 for the
+    /// rest. Null is no answer — unreachable, or a status that says neither.</summary>
+    public async Task<bool?> ServesAsync(string name, CancellationToken ct = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                Url("/metrics?model=" + Uri.EscapeDataString(name)));
+            if (ApiKey is not null)
+                request.Headers.Add("Authorization", "Bearer " + ApiKey);
+            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            return response.IsSuccessStatusCode ? true
+                 : response.StatusCode == System.Net.HttpStatusCode.NotFound ? false
+                 : null;
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>GET /metrics — the whole stats payload: engine, live, machine, requests, 60-sample history.</summary>
     public async Task<ServerStatus?> MetricsAsync(CancellationToken ct = default)
         => await GetAsync("/metrics", ServerStatusParser.ParseMetrics, withKey: true, ct: ct);
