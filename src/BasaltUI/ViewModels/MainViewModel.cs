@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Input;
 using BasaltUI.Core;
+using BasaltUI.Shell;
 
 namespace BasaltUI.ViewModels;
 
@@ -1066,31 +1067,64 @@ public sealed class MainViewModel : ObservableObject
 
     public void IgnoreForeign() => ForeignPids = [];
 
-    /// <summary>Run a different model without restarting the server.</summary>
+    /// <summary>Run a different model without restarting the server. A "model not found" right after a
+    /// restart is the old server's last word — it answers until it is gone while the new one takes seconds
+    /// to listen — so that one answer is waited out and asked again, silently; anything else is said once.</summary>
     public async Task SwitchModelAsync(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
             return;
         var body = "{\"model\":" + System.Text.Json.JsonSerializer.Serialize(name) + "}";
-        await ControlAsync("/v1/load", body, "switch to " + name);
+        for (var tries = 0; ; tries++)
+        {
+            var (ok, detail) = await client.PostAsync("/v1/load", body);
+            if (!ok && detail.Contains("model not found", StringComparison.OrdinalIgnoreCase) && tries < 5)
+            {
+                await Task.Delay(1500);
+                continue;                                       // the ghost's answer; the new server is coming up
+            }
+            Append($"server: switch to {name} → {detail}", ok ? LogSource.App : LogSource.Error);
+            trace($"switch {name} -> {detail}");
+            await poller.BeatAsync();
+            return;
+        }
     }
 
     /// <summary>
     /// A file clicked in the Models card. The engine only serves what its config listed when it started, so
-    /// the click answers itself by pointing the config at the file when no entry already does: a running
-    /// server restarts with the file aboard and the switch then finds it, a stopped one starts with it. A
-    /// file the engine already serves switches in place, no restart.
+    /// the click makes the config carry the file: an entry that is already there switches in place, a new
+    /// one is asked for first — another entry's settings with the path replaced, or basalt's own defaults —
+    /// and then a running server restarts with the file aboard, a stopped one starts with it.
     /// </summary>
     public async Task OpenLocalModel(string file)
     {
-        if (status.Reachable && ServesFile(file))
+        var cfg = getConfig();
+        if (cfg is null)
         {
-            await SwitchModelAsync(file);
+            Append("no config file — pick one in Settings → Paths first", LogSource.Error);
+            return;
+        }
+        var entries = cfg.ModelEntries();
+        var entryIndex = entries.FindIndex(e => SameModelFile(ConfigDocument.Text(e, "model"), file));
+
+        // In the config and the running server serves it (its list is in the config's order, so the entry's
+        // face is known while the counts agree; a name match is the fallback)? Then the switch answers in
+        // place, no restart.
+        var served = entryIndex >= 0 && (status.Models.Count == entries.Count || ServesFile(file));
+        if (status.Reachable && served)
+        {
+            await SwitchModelAsync(Path.GetFileName(file));
             return;
         }
 
-        if (!PointConfigAt(file))
-            return;                                             // no config, or the save failed: the log says which
+        if (entryIndex < 0)
+        {
+            var (ok, template) = AskEntry(file);
+            if (!ok)
+                return;                                         // the click stepped back
+            if (!AddConfigEntry(file, template))
+                return;                                         // the save failed: the log says what stopped it
+        }
 
         if (status.Reachable)
         {
@@ -1105,10 +1139,15 @@ public sealed class MainViewModel : ObservableObject
                 return;                                         // the start checks already said what stopped it
         }
 
-        // The engine answers on its own, loading its config's first model; wait for it, then switch this file
-        // in — it is configured now, so the switch finds it, and the answer lands in the log either way.
-        for (var waited = 0; waited < 20 && !status.Reachable; waited++)
+        // The engine listens before it loads, so an answer can come while the first model is still coming
+        // in; the switch below waits its turn with everything else.
+        for (var waited = 0; waited < 30; waited++)
+        {
+            await poller.BeatAsync();
+            if (status.Reachable)
+                break;
             await Task.Delay(1000);
+        }
         if (!status.Reachable)
         {
             Append("app: the server has not answered yet — it may still be loading; the log keeps the word",
@@ -1123,11 +1162,40 @@ public sealed class MainViewModel : ObservableObject
     private bool ServesFile(string file) => status.Models.Any(m => SameModelFile(m.Id, file));
 
     /// <summary>
-    /// Make sure the engine's config lists the file, adding an entry and saving when none points at it. The
-    /// new entry keeps the settings of the first one — kv, context, gpu, the rest — so a downloaded pack is
-    /// served the way the configured one is; basalt's own defaults would be a second, unconsidered choice.
+    /// A file with no entry in the config yet: the entry decides how the model is served — kv, context,
+    /// gpu, the rest — so the click asks instead of choosing for you. The answers are an existing entry's
+    /// settings with the model path replaced, or a new entry with basalt's own defaults.
     /// </summary>
-    private bool PointConfigAt(string file)
+    private (bool Ok, JsonObject? Template) AskEntry(string file)
+    {
+        var entries = getConfig()?.ModelEntries() ?? [];
+        var options = new List<string>();
+        var templates = new List<JsonObject?>();
+
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var name = Path.GetFileNameWithoutExtension(ConfigDocument.Text(entries[i], "model")?.Trim() ?? "");
+            if (name.Length == 0)
+                name = $"entry {i + 1}";
+            options.Add($"the settings of {name} — with the model path replaced");
+            templates.Add(entries[i]);
+        }
+        options.Add("a new entry — basalt's own defaults");
+        templates.Add(null);
+
+        var pick = Dialog.Choose(null, "Add the model to the config",
+            $"{file} is not in the config yet, and the engine only serves what the config lists. " +
+            "The new entry carries which settings?",
+            options);
+        if (pick is null)
+            return (false, null);
+        var at = options.IndexOf(pick);
+        return (true, at >= 0 ? templates[at] : null);
+    }
+
+    /// <summary>Add the entry pointing at the file and save: the chosen settings, the path replaced. A copied
+    /// alias would serve the new file under the old name, so it does not travel along.</summary>
+    private bool AddConfigEntry(string file, JsonObject? template)
     {
         var cfg = getConfig();
         if (cfg is null)
@@ -1135,17 +1203,15 @@ public sealed class MainViewModel : ObservableObject
             Append("no config file — pick one in Settings → Paths first", LogSource.Error);
             return false;
         }
-        if (cfg.ModelEntries().Any(e => SameModelFile(ConfigDocument.Text(e, "model"), file)))
-            return true;
 
         var full = Path.IsPathRooted(file) ? file
                  : Settings.ModelsFolder.Length > 0 ? Path.Combine(Settings.ModelsFolder, file)
                  : file;
         var model = full.Replace('\\', '/');
 
-        var entry = cfg.ModelEntries().FirstOrDefault() is { } first ? (JsonObject)first.DeepClone() : new JsonObject();
+        var entry = template is { } t ? (JsonObject)t.DeepClone() : new JsonObject();
         entry["model"] = model;
-        entry.Remove("alias");                                  // a copied alias would serve the new file under the old name
+        entry.Remove("alias");
         cfg.Models.Add(entry);
         try
         {
@@ -1240,40 +1306,63 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// What the card shows is one honest list: the models a running server serves, then the files
-    /// sitting in the models folder that the server is not serving (a click on one of those switches
-    /// to it, or starts basalt for it when the config already points at the file).
+    /// What the card shows is the models folder: every local file, always — configured or not, served or
+    /// not, so a model cannot vanish the moment the config points at it. A configured file wears the state
+    /// of its served face, paired through the config: /v1/models lists the configured models in the
+    /// config's order, so while the counts agree the i-th row is the i-th entry's — how a pack name
+    /// ("Qwen3.8-Flash-Next UD-IQ3_XXS") ties to its file ("Qwen3.8-FN-UD-IQ3_XXS.basalt"), whose names
+    /// share nothing. Served models no local file accounts for keep their own rows.
     /// </summary>
     private void RebuildDisplay()
     {
         var rows = new List<HomeModelRow>();
-        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var m in status.Models)
-        {
-            rows.Add(new HomeModelRow(m.Id, m.Detail, Live: true,
-                                      Loaded: m.Status.Contains("loaded", StringComparison.OrdinalIgnoreCase)));
-            known.Add(m.Id);
-            known.Add(Stem(m.Id));
-        }
+        var served = status.Models;
 
-        // A config entry that points at a folder file is the engine's row in disguise: the pack carries
-        // its own name, so the stems can differ ("…FN-…" serves as "…Flash-Next …"). With the server up
-        // its list is the authority — the file would only be the same model twice. Stopped, the folder
-        // list stays whole: those rows are what a double-click starts basalt with.
-        var configured = status.Reachable
-            ? getConfig()?.ModelEntries()
-                .Select(e => Path.GetFileName(ConfigDocument.Text(e, "model")?.Trim() ?? ""))
-                .Where(n => n.Length > 0)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase)
-            : null;
+        var entries = status.Reachable ? getConfig()?.ModelEntries() : null;
+        var paired = entries is not null && served.Count == entries.Count;
+        var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);   // served ids a file row carries
 
         foreach (var f in localModels)
         {
-            if (known.Contains(f.Name) || known.Contains(Stem(f.Name)))
+            ModelRow? face = null;
+            if (paired)
+            {
+                for (var i = 0; i < entries!.Count; i++)
+                {
+                    if (!SameModelFile(ConfigDocument.Text(entries[i], "model"), f.Name))
+                        continue;
+                    face = served[i];
+                    break;
+                }
+            }
+            else
+            {
+                // counts that do not agree: pair by name where the names agree, and let the rest show twice
+                face = served.FirstOrDefault(m => SameModelFile(m.Id, f.Name) ||
+                                                 Stem(m.Id).Equals(Stem(f.Name), StringComparison.OrdinalIgnoreCase));
+            }
+
+            string detail;
+            var loaded = false;
+            if (face is { } m)
+            {
+                claimed.Add(m.Id);
+                loaded = m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase);
+                detail = $"{f.Detail} · in the config — {m.Detail}";
+            }
+            else
+            {
+                detail = $"{f.Detail} · in the models folder";
+            }
+            rows.Add(new HomeModelRow(f.Name, detail, Live: false, Loaded: loaded));
+        }
+
+        foreach (var m in served)
+        {
+            if (claimed.Contains(m.Id))
                 continue;
-            if (configured?.Contains(f.Name) == true)
-                continue;
-            rows.Add(new HomeModelRow(f.Name, f.Detail + " · in the models folder", Live: false));
+            rows.Add(new HomeModelRow(m.Id, m.Detail, Live: true,
+                                      Loaded: m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase)));
         }
 
         var ids = string.Join("|", rows.Select(r => r.Id + ":" + r.Detail));

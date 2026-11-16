@@ -33,6 +33,19 @@ public partial class Dialog : Window
         return box.confirmed;
     }
 
+    /// <summary>A question whose answer is one line out of a list. Returns the chosen option,
+    /// null when the question was stepped back from.</summary>
+    public static string? Choose(Window? owner, string title, string message, IReadOnlyList<string> options,
+                                 string confirm = "Continue")
+    {
+        var box = new Dialog(OwnerOr(owner), title, message, confirm, "Cancel");
+        box.ChoiceBox.ItemsSource = options;
+        box.ChoiceBox.SelectedIndex = 0;
+        box.ChoiceBox.Visibility = Visibility.Visible;
+        box.ShowDialog();
+        return box.confirmed && box.ChoiceBox.SelectedItem is string pick ? pick : null;
+    }
+
     /// <summary>One button, one fact.</summary>
     public static void Info(Window? owner, string title, string message)
     {
