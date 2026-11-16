@@ -137,7 +137,10 @@ public sealed class BasaltClient
     private static readonly HttpClient Http = Create(TimeSpan.FromSeconds(2.5));
     /// <summary>A load or unload blocks for the whole weights load — minutes for a big pack — so the control
     /// posts get a client with room to wait. The polls keep the short one: a hung poll must not stall the panel.</summary>
-    private static readonly HttpClient Slow = Create(TimeSpan.FromMinutes(15));
+    /// <summary>A load blocks this POST until the weights are in: a cold 80 GB read from disk has taken
+    /// past fifteen minutes, so the ceiling is half an hour — a cancel here would say "canceled" while
+    /// the engine carries on loading anyway.</summary>
+    private static readonly HttpClient Slow = Create(TimeSpan.FromMinutes(30));
 
     private static HttpClient Create(TimeSpan timeout)
     {
