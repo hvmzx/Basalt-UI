@@ -97,6 +97,7 @@
         <!-- ============ the body: dashboard, or a page over it ============ -->
         <Grid Grid.Row="1">
             <pages:SettingsPage x:Name="SettingsPanel" Visibility="Collapsed" />
+            <pages:DownloadsPage x:Name="DownloadsPanel" Visibility="Collapsed" />
             <pages:ReleaseNotesPage x:Name="NotesPage" Visibility="Collapsed" />
 
             <Grid x:Name="PageMain">
@@ -439,6 +440,13 @@
                        Foreground="{DynamicResource TextFaint}" Margin="16,0,0,0" />
             <TextBlock DockPanel.Dock="Right" Text="{Binding Log.Count, StringFormat={}{0} lines}"
                        Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}" />
+            <!-- centre: the downloads centre. Every transfer the app starts lives there, and the word
+                 counts what is on its way. -->
+            <TextBlock x:Name="DownloadsLink" Text="Downloads" Style="{StaticResource Label}"
+                       Foreground="{DynamicResource TextSecondary}" Cursor="Hand" Background="Transparent"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       MouseLeftButtonUp="Downloads_Click"
+                       ToolTip="The downloads centre — what is coming down now, and what came down before" />
         </DockPanel>
             </Grid>
         </Grid>

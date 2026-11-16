@@ -19,7 +19,6 @@ namespace BasaltUI;
 public partial class ModelsBrowserWindow : Window
 {
     private readonly App app;
-    private CancellationTokenSource? cts;
     private HfRepo? repo;
 
     public ModelsBrowserWindow(App app)
@@ -31,7 +30,14 @@ public partial class ModelsBrowserWindow : Window
         QueryBox.Text = "basalt";
         FolderText.Text = app.Settings.ModelsFolder;
         Loaded += (_, _) => _ = SearchAsync();
-        Closed += (_, _) => cts?.Cancel();
+        app.Downloads.ItemChanged += OnTransferChanged;
+        app.Downloads.ListChanged += OnTransferListChanged;
+        Closed += (_, _) =>
+        {
+            app.Downloads.ItemChanged -= OnTransferChanged;
+            app.Downloads.ListChanged -= OnTransferListChanged;
+        };
+        RefreshTransfer();
     }
 
     private AppSettings Settings => app.Settings;
@@ -157,20 +163,23 @@ public partial class ModelsBrowserWindow : Window
         try
         {
             var files = await HuggingFace.FilesAsync(Settings.HfMirror, chosen.Repo.Id, CancellationToken.None);
-            var rows = files.Select(f => new FileRow(f, DestinationFor(f))).ToList();
-            FilesList.ItemsSource = rows;
 
-            var loadable = rows.Count(r => r.File.IsLoadable);
+            // Only the packs. Readmes, chat templates and licence files may be interesting, but this list
+            // is for things that can be pulled and loaded — everything else just buries the model files.
+            var rows = files.Where(f => f.IsBasalt).Select(f => new FileRow(f, DestinationFor(f))).ToList();
+            FilesList.ItemsSource = rows;
+            SyncRows();
+
             var here = rows.Count(r => r.AlreadyThere);
-            PickNote.Text = loadable switch
+            PickNote.Text = rows.Count switch
             {
-                0 => "nothing in basalt or gguf format here — the files may still be useful to look at",
-                var n => $"{n} model file{(n == 1 ? "" : "s")} here, " +
-                         $"{string.Join(", ", rows.Where(r => r.File.IsLoadable).Select(r => r.SizeText))}" +
+                0 => "no .basalt pack in this repo — the readmes and other files stay out of the list",
+                var n => $"{n} pack{(n == 1 ? "" : "s")} here, " +
+                         $"{string.Join(", ", rows.Select(r => r.SizeText))}" +
                          (here > 0 ? $" · {here} already in the folder" : ""),
             };
-            SetModelButton.IsEnabled = loadable > 0;
-            DownloadAllButton.IsEnabled = rows.Any(r => r.File.IsLoadable && !r.AlreadyThere);
+            SetModelButton.IsEnabled = rows.Count > 0;
+            DownloadAllButton.IsEnabled = rows.Any(r => !r.AlreadyThere);
         }
         catch (Exception ex)
         {
@@ -265,7 +274,7 @@ public partial class ModelsBrowserWindow : Window
             return;
 
         // The point of this menu item is that the path is in the clipboard before the user has to type it.
-        var pick = rows.FirstOrDefault(r => r.File.IsBasalt) ?? rows.FirstOrDefault(r => r.File.IsLoadable);
+        var pick = rows.FirstOrDefault();
         if (pick is null)
             return;
 
@@ -312,95 +321,87 @@ public partial class ModelsBrowserWindow : Window
     }
 
     // ---- downloading ---------------------------------------------------------------------------------------------
-    private async void DownloadOne_Click(object sender, RoutedEventArgs e)
+    private void DownloadOne_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is not FileRow row)
+        if ((sender as FrameworkElement)?.Tag is not FileRow row || repo is null)
             return;
-        await Pull(new[] { row });
+        app.Downloads.Enqueue(repo.Id, HuggingFace.DownloadUrl(Settings.HfMirror, repo.Id, row.File.Path).ToString(),
+                              DestinationFor(row.File), row.File.Size, row.File.Sha256);
     }
 
-    private async void DownloadAll_Click(object sender, RoutedEventArgs e)
+    private void DownloadAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (FilesList.ItemsSource is not IEnumerable<FileRow> rows || repo is null)
+            return;
+
+        // everything in the list that is not here yet, smallest first: a pack set arrives whole
+        foreach (var row in rows.Where(r => !r.AlreadyThere).OrderBy(r => r.File.Size))
+            app.Downloads.Enqueue(repo.Id, HuggingFace.DownloadUrl(Settings.HfMirror, repo.Id, row.File.Path).ToString(),
+                                  DestinationFor(row.File), row.File.Size, row.File.Sha256);
+    }
+
+    // ---- what the transfers are doing ---------------------------------------------------------------------------
+    /// <summary>One tracked file changed: the row for it, if this repo is showing it, and the strip below.</summary>
+    private void OnTransferChanged(DownloadItem item)
+    {
+        if (FilesList.ItemsSource is IEnumerable<FileRow> rows)
+            foreach (var row in rows.Where(r => SameFile(r.Destination, item.FilePath)))
+                row.RefreshFrom(item);
+        RefreshTransfer();
+    }
+
+    private void OnTransferListChanged() => RefreshTransfer();
+
+    /// <summary>Give every row its honest state: the download centre's word if it is tracking this file,
+    /// otherwise what the folder itself says.</summary>
+    private void SyncRows()
     {
         if (FilesList.ItemsSource is not IEnumerable<FileRow> rows)
             return;
-
-        // everything basalt could read, smallest first: a shard set arrives whole, and a mistake is cheap early on
-        var wanted = rows.Where(r => r.File.IsLoadable && !r.AlreadyThere)
-                         .OrderBy(r => r.File.Size).ToList();
-        if (wanted.Count == 0)
-            return;
-
-        await Pull(wanted);
-    }
-
-    private async Task Pull(IReadOnlyList<FileRow> rows)
-    {
-        cts?.Cancel();
-        cts = new CancellationTokenSource();
-        var ct = cts.Token;
-
-        foreach (var row in rows)
-            row.Busy = true;
-        CancelButton.Visibility = Visibility.Visible;
-        DownloadAllButton.IsEnabled = false;
-
-        var failed = 0;
         foreach (var row in rows)
         {
-            if (ct.IsCancellationRequested)
-                break;
-
-            JobText.Text = row.Name;
-            var job = new DownloadJob(
-                HuggingFace.DownloadUrl(Settings.HfMirror, repo?.Id ?? "", row.File.Path),
-                DestinationFor(row.File), row.File.Sha256, row.File.Size, row.File.Name);
-
-            var progress = new Progress<DownloadProgress>(p => Show(row, p));
-            var error = await SegmentedDownload.RunAsync(job, Settings.DownloadConnections, progress, Trace, ct);
-
-            row.Busy = false;
-            if (error is null && !ct.IsCancellationRequested)
-            {
-                row.AlreadyThere = true;
-                row.State = "in the folder";
-                JobText.Text = row.Name + " is in " + Settings.ModelsFolder;
-                SpeedText.Text = "";
-                JobBar.Value = 1;
-            }
-            else if (error is not null)
-            {
-                failed++;
-                row.State = error.Length > 60 ? error[..60] + "…" : error;
-                JobText.Text = row.Name + ": " + error;
-            }
+            var item = app.Downloads.Items.FirstOrDefault(i => SameFile(i.FilePath, row.Destination));
+            if (item is not null)
+                row.RefreshFrom(item);
+            else
+                row.ResetFromDisk();
         }
-
-        CancelButton.Visibility = Visibility.Collapsed;
-        foreach (var row in rows)
-            row.Busy = false;
-        if (!ct.IsCancellationRequested && failed == 0)
-            JobText.Text = "done — add the file to a model in Settings → Models, then restart basalt";
-        DownloadAllButton.IsEnabled = FilesList.ItemsSource is IEnumerable<FileRow> all &&
-                                      all.Any(r => r.File.IsLoadable && !r.AlreadyThere);
     }
 
-    private void Show(FileRow row, DownloadProgress p)
+    /// <summary>The strip at the bottom: whatever transfer the centre is running, whatever page it was
+    /// started from — it does not belong to this window, it is just shown here.</summary>
+    private void RefreshTransfer()
     {
-        JobBar.Value = p.Fraction;
-        JobText.Text = row.Name;
-        SpeedText.Text = p.Text + (p.ActiveConnections > 1 ? $" · {p.ActiveConnections} connections" : "");
-        row.State = p.Phase is "checking" or "done" ? p.Text : p.SpeedText;
+        var item = app.Downloads.Current;
+        PauseButton.Visibility = item is { State: "downloading" } ? Visibility.Visible : Visibility.Collapsed;
+        if (item is null)
+        {
+            JobText.Text = "nothing on its way — downloads live in the centre, bottom of the main page";
+            SpeedText.Text = "";
+            JobBar.Value = 0;
+            return;
+        }
+        JobText.Text = item.Name + (item.State == "queued" ? " — waiting" : "");
+        SpeedText.Text = item.Line;
+        JobBar.Value = item.Fraction;
     }
 
-    private void Trace(string line)
-        => Dispatcher.BeginInvoke(() => TraceText.Text = line);
-
-    private void Cancel_Click(object sender, RoutedEventArgs e)
+    private void PauseTransfer_Click(object sender, RoutedEventArgs e)
     {
-        cts?.Cancel();
-        CancelButton.Visibility = Visibility.Collapsed;
-        JobText.Text = "stopped — run the file again to carry on from where it stopped";
-        SpeedText.Text = "";
+        if (app.Downloads.Current is { } item)
+            app.Downloads.Pause(item);
+    }
+
+    private static bool SameFile(string a, string b)
+    {
+        try
+        {
+            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     // ---- rows ---------------------------------------------------------------------------------------------------
@@ -433,6 +434,7 @@ public partial class ModelsBrowserWindow : Window
         public FileRow(HfFile file, string destination)
         {
             File = file;
+            Destination = destination;
             try
             {
                 AlreadyThere = file.Size > 0 && new FileInfo(destination).Length == file.Size;
@@ -445,9 +447,10 @@ public partial class ModelsBrowserWindow : Window
         }
 
         public HfFile File { get; }
+        public string Destination { get; }
         public string Name => File.Name;
         public string SizeText => File.SizeText;
-        public string Where => File.IsLoadable ? File.Folder : "not a model file";
+        public string Where => File.IsBasalt ? File.Folder : "not a model file";
 
         public string State { get => state; set => Set(ref state, value); }
 
@@ -460,6 +463,34 @@ public partial class ModelsBrowserWindow : Window
         {
             get => busy;
             set { if (Set(ref busy, value)) Raise(nameof(CanStart)); }
+        }
+
+        /// <summary>The row takes its words from the transfer tracking this file, wherever it was started.</summary>
+        public void RefreshFrom(DownloadItem item)
+        {
+            AlreadyThere = item.State == "finished";
+            Busy = item.State == "downloading";
+            State = item.State switch
+            {
+                "failed" => item.Error.Length > 60 ? item.Error[..60] + "…" : item.Error,
+                _ => item.ShortLine,
+            };
+        }
+
+        /// <summary>No transfer is tracking this file any more — the folder gets its say back.</summary>
+        public void ResetFromDisk()
+        {
+            Busy = false;
+            try
+            {
+                AlreadyThere = File.Size > 0 && new FileInfo(Destination).Length == File.Size;
+                State = AlreadyThere ? "in the folder" : "";
+            }
+            catch
+            {
+                AlreadyThere = false;
+                State = "";
+            }
         }
     }
 }

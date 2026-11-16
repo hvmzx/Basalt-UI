@@ -29,6 +29,7 @@ public partial class App : Application
     public BasaltProcess Server { get; } = new();
     public MainViewModel Vm { get; }
     public ConfigDocument? Config { get; private set; }
+    public DownloadCenter Downloads { get; }
 
     MainWindow? window;
     Shell.TrayIcon? tray;
@@ -51,6 +52,7 @@ public partial class App : Application
         Settings = AppSettings.Load();
         Client = new BasaltClient();
         Poller = new StatusPoller(Client);
+        Downloads = new DownloadCenter(Settings);
         Vm = new MainViewModel(Settings, Server, Client, Poller, () => Config, ReloadConfig, AppPaths.Log);
     }
 
@@ -126,6 +128,10 @@ public partial class App : Application
         ReloadConfig();
         Vm.ReapplyPolling();
         Net.Configure(Settings.ProxyUrl);
+
+        // What was on its way when the app last went away goes back on its way now — the user never
+        // asked it to stop, so the app does not treat a restart as one either.
+        Downloads.LoadSaved();
 
         // Where the app keeps its own files is the one thing that has to go right for it to remember
         // anything, and for a long time it could fail with nothing on screen to show for it.
@@ -370,6 +376,7 @@ public partial class App : Application
         }
         Settings.Save();
 
+        Downloads.StopForExit();
         Poller.Dispose();
         tray?.Dispose();
         Server.Dispose();

@@ -56,7 +56,23 @@ public partial class MainWindow : Window
         Vm.Log.CollectionChanged += OnLogChanged;
         Vm.ModelsBrowserRequested += app.ShowModelsBrowser;
         Vm.WebUiRequested += app.ShowWebUi;
+
+        // The downloads centre link in the footer shows whether anything is on its way.
+        app.Downloads.ListChanged += RefreshDownloadsLink;
+        app.Downloads.ItemChanged += _ => RefreshDownloadsLink();
+        RefreshDownloadsLink();
     }
+
+    /// <summary>The footer's centre word: the count when something is coming down.</summary>
+    private void RefreshDownloadsLink()
+    {
+        var active = app.Downloads.ActiveCount;
+        DownloadsLink.Text = active == 0 ? "Downloads" : $"Downloads · {active} on the way";
+        if (page == Page.Downloads)
+            DownloadsPanel.RefreshSummary();
+    }
+
+    private void Downloads_Click(object sender, RoutedEventArgs e) => OpenDownloads();
 
     // ---- geometry ------------------------------------------------------------------------------------------
     private void ApplySavedBounds()
@@ -78,41 +94,52 @@ public partial class MainWindow : Window
         Height = Math.Clamp(s.WindowHeight, MinHeight, SystemParameters.VirtualScreenHeight);
     }
 
-    // ---- pages: the dashboard, and settings / release notes over it -----------------------------------------
-    private bool onSettings;
-    private bool onNotes;
+    // ---- pages: the dashboard, and settings / downloads / release notes over it -------------------------------
+    private enum Page { Main, Settings, Downloads, Notes }
 
-    private void ShowPage(bool main, string? title = null)
+    private Page page = Page.Main;
+
+    private void ShowPage(Page which)
     {
-        onSettings = !main && title == "Settings";
-        onNotes = !main && title != "Settings";
-        if (onSettings)
+        page = which;
+        if (which == Page.Settings)
             SettingsPanel.OnShown();
-        SettingsPanel.Visibility = main ? Visibility.Collapsed : (onSettings ? Visibility.Visible : Visibility.Collapsed);
-        NotesPage.Visibility = main ? Visibility.Collapsed : (onNotes ? Visibility.Visible : Visibility.Collapsed);
-        PageMain.Visibility = main ? Visibility.Visible : Visibility.Collapsed;
-        MainTitle.Visibility = main ? Visibility.Visible : Visibility.Collapsed;
-        MainActions.Visibility = main ? Visibility.Visible : Visibility.Collapsed;
-        PageTitle.Visibility = main ? Visibility.Collapsed : Visibility.Visible;
-        if (!main)
-            PageTitleText.Text = title;
+        if (which == Page.Downloads)
+            DownloadsPanel.OnShown();
+        SettingsPanel.Visibility = which == Page.Settings ? Visibility.Visible : Visibility.Collapsed;
+        DownloadsPanel.Visibility = which == Page.Downloads ? Visibility.Visible : Visibility.Collapsed;
+        NotesPage.Visibility = which == Page.Notes ? Visibility.Visible : Visibility.Collapsed;
+        PageMain.Visibility = which == Page.Main ? Visibility.Visible : Visibility.Collapsed;
+        MainTitle.Visibility = which == Page.Main ? Visibility.Visible : Visibility.Collapsed;
+        MainActions.Visibility = which == Page.Main ? Visibility.Visible : Visibility.Collapsed;
+        PageTitle.Visibility = which == Page.Main ? Visibility.Collapsed : Visibility.Visible;
+        if (which != Page.Main)
+            PageTitleText.Text = which switch
+            {
+                Page.Settings => "Settings",
+                Page.Downloads => "Downloads",
+                _ => "Release notes",
+            };
     }
 
     /// <summary>The window is one window: settings is a page over the dashboard, and the arrow takes you back.</summary>
-    public void OpenSettings() => ShowPage(false, "Settings");
+    public void OpenSettings() => ShowPage(Page.Settings);
+
+    /// <summary>The downloads centre, the same kind of page: the arrow takes you back.</summary>
+    public void OpenDownloads() => ShowPage(Page.Downloads);
 
     /// <summary>The release notes, the same kind of page: read in the app, the arrow takes you back.</summary>
     public void OpenNotes(BasaltRelease release)
     {
         NotesPage.Show(app, release);
-        ShowPage(false, "Release notes");
+        ShowPage(Page.Notes);
     }
 
     private void Back_Click(object sender, RoutedEventArgs e)
     {
-        if (onSettings && !SettingsPanel.TryLeave())
+        if (page == Page.Settings && !SettingsPanel.TryLeave())
             return;
-        ShowPage(true);
+        ShowPage(Page.Main);
     }
 
     // ---- the window's own chrome buttons ---------------------------------------------------------------------

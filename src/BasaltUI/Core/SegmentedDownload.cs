@@ -193,7 +193,7 @@ public static class SegmentedDownload
             shared.Done = written.Sum();
 
             using var reportGate = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            var reporter = ReportAsync(progress, () => (Interlocked.Read(ref shared.Done), total, Volatile.Read(ref shared.Active)), reportGate.Token);
+            var reporter = ReportAsync(progress, total, () => (Interlocked.Read(ref shared.Done), Volatile.Read(ref shared.Active)), reportGate.Token);
 
             var workers = new Task[connections];
             for (var w = 0; w < connections; w++)
@@ -359,13 +359,18 @@ public static class SegmentedDownload
         }
     }
 
-    private static Task ReportAsync(IProgress<DownloadProgress>? progress, Func<(long Done, long Total, int Active)> snapshot,
-                                    CancellationToken ct)
+    /// <summary>
+    /// The steady ticker for a multi-connection pull. The total is given once here — the snapshot only
+    /// knows how far along the shared counter is — and without it the percent stays 0 forever and the
+    /// progress bar with it, which is exactly what the first release did.
+    /// </summary>
+    private static Task ReportAsync(IProgress<DownloadProgress>? progress, long total,
+                                    Func<(long Done, int Active)> snapshot, CancellationToken ct)
         => Task.Run(async () =>
         {
             if (progress is null)
                 return;
-            var speed = new Speed(0, 0, progress);
+            var speed = new Speed(total, 0, progress);
             while (!ct.IsCancellationRequested)
             {
                 try
@@ -377,7 +382,7 @@ public static class SegmentedDownload
                     return;
                 }
 
-                var (d, t, a) = snapshot();
+                var (d, a) = snapshot();
                 speed.Tick(d, a);
             }
         }, CancellationToken.None);
