@@ -46,7 +46,8 @@ public sealed class DownloadItem : BasaltUI.ViewModels.ObservableObject
         {
             if (Set(ref state, value))
                 RaiseAll(nameof(IsQueued), nameof(IsDownloading), nameof(IsPaused), nameof(IsFailed),
-                         nameof(IsDoneOrFailed), nameof(Active), nameof(CanResume));
+                         nameof(IsDoneOrFailed), nameof(Active), nameof(CanResume),
+                         nameof(Line), nameof(ShortLine), nameof(EtaText), nameof(ElapsedText), nameof(WhenText));
         }
     }
 
@@ -67,7 +68,8 @@ public sealed class DownloadItem : BasaltUI.ViewModels.ObservableObject
         set
         {
             if (Set(ref done, value))
-                Raise(nameof(PercentText));
+                RaiseAll(nameof(Fraction), nameof(PercentText), nameof(Line), nameof(ShortLine),
+                         nameof(EtaText), nameof(ElapsedText), nameof(WhenText));
         }
     }
 
@@ -75,7 +77,11 @@ public sealed class DownloadItem : BasaltUI.ViewModels.ObservableObject
     public double BytesPerSecond
     {
         get => bps;
-        set => Set(ref bps, value);
+        set
+        {
+            if (Set(ref bps, value))
+                RaiseAll(nameof(SpeedText), nameof(Line), nameof(ShortLine), nameof(EtaText));
+        }
     }
 
     private string error = "";
@@ -91,12 +97,55 @@ public sealed class DownloadItem : BasaltUI.ViewModels.ObservableObject
     public string PercentText => TotalBytes > 0 ? $"{done * 100.0 / TotalBytes:0.#}%" : "";
     public string SpeedText => bps > 0 ? BasaltLocator.HumanBytes((long)bps) + "/s" : "—";
 
+    /// <summary>How long this has been on its way, shown while it runs instead of the "added" time.</summary>
+    public string ElapsedText
+    {
+        get
+        {
+            var span = DateTime.Now - Started;
+            if (span < TimeSpan.Zero)
+                span = TimeSpan.Zero;
+            return span.TotalHours >= 1
+                ? $"{(int)span.TotalHours} h {span.Minutes} m"
+                : $"{span.Minutes} m {span.Seconds} s";
+        }
+    }
+
+    /// <summary>At the current speed, the rest of the file is this far away.</summary>
+    public string EtaText
+    {
+        get
+        {
+            if (State != "downloading" || TotalBytes <= 0 || bps <= 0)
+                return "";
+            var seconds = (TotalBytes - done) / bps;
+            return HumanSeconds(seconds) + " left";
+        }
+    }
+
+    private static string HumanSeconds(double seconds)
+    {
+        var s = (long)Math.Max(0, seconds);
+        return s >= 3600
+            ? $"{s / 3600} h {s % 3600 / 60} m"
+            : s >= 60 ? $"{s / 60} m {s % 60} s"
+            : $"{s} s";
+    }
+
+    /// <summary>The right-hand corner of a row: how long it has run, or when it was added.</summary>
+    public string WhenText => State is "queued" or "downloading" ? $"running {ElapsedText}" : $"added {Started:HH:mm}";
+
     /// <summary>The one line the row and the transfer strip both read.</summary>
     public string Line => State switch
     {
         "queued" => "waiting — the downloads ahead of it finish first",
         "downloading" => TotalBytes > 0
-            ? $"{PercentText} · {BasaltLocator.HumanBytes(done)} of {SizeText} · {SpeedText}"
+            ? string.Join(" · ", new[]
+              {
+                  $"{PercentText}  {BasaltLocator.HumanBytes(done)} of {SizeText}",
+                  SpeedText,
+                  EtaText,
+              }.Where(part => part.Length > 0))
             : $"{BasaltLocator.HumanBytes(done)} · {SpeedText}",
         "paused" => TotalBytes > 0 ? $"paused at {PercentText} of {SizeText}" : "paused",
         "finished" => "in the models folder",

@@ -806,7 +806,9 @@
                 <ControlTemplate TargetType="{x:Type ProgressBar}">
                     <Border Background="{TemplateBinding Background}" CornerRadius="2.5">
                         <Grid ClipToBounds="True">
-                            <Rectangle x:Name="PART_TrackingBar" />
+                            <!-- The names are WPF's contract: it sizes PART_Indicator itself, against
+                                 PART_Track's width. Any other name and the fill never moves. -->
+                            <Rectangle x:Name="PART_Track" />
                             <Rectangle x:Name="PART_Indicator" HorizontalAlignment="Left" RadiusX="2.5" RadiusY="2.5"
                                        Fill="{TemplateBinding Foreground}" />
                         </Grid>

@@ -184,6 +184,40 @@ internal static class Program
         written += Shoot(hint, Path.Combine(dir, "04-models-hint.png"), maps,
                          ("search", 14, 10, 996, 82));
 
+        // the downloads centre: synthetic transfers so the row states and the bars can be judged —
+        // one on its way with real figures, one done, one failed. The centre reads whatever the
+        // DownloadCenter holds, so the seeds go straight into its list.
+        var center = app.Downloads;
+        center.Items.Add(new DownloadItem("jesdga/Qwen3.8-27B-Basalt",
+            "https://huggingface.co/jesdga/Qwen3.8-27B-Basalt/resolve/main/Qwen3.8-27B-QUASAR-NVFP4.basalt",
+            @"C:\models\Qwen3.8-27B-QUASAR-NVFP4.basalt", 19_700_000_000, "", DateTime.Now.AddMinutes(-14))
+        {
+            State = "downloading",
+            DoneBytes = 2_100_000_000,
+            BytesPerSecond = 13_600_000,
+        });
+        center.Items.Add(new DownloadItem("jesdga/Qwen3.8-8B-Basalt",
+            "https://huggingface.co/jesdga/Qwen3.8-8B-Basalt/resolve/main/Qwen3.8-8B.basalt",
+            @"C:\models\Qwen3.8-8B.basalt", 8_100_000_000, "", DateTime.Now.AddHours(-3))
+        {
+            State = "finished",
+            DoneBytes = 8_100_000_000,
+        });
+        center.Items.Add(new DownloadItem("other/tiny-pack",
+            "https://huggingface.co/other/tiny-pack/resolve/main/tiny.basalt",
+            @"C:\models\tiny.basalt", 1_200_000_000, "", DateTime.Now.AddHours(-5))
+        {
+            State = "failed",
+            Error = "the server would not say how big the file is",
+        });
+        var downloadsHost = new MainWindow(app);
+        downloadsHost.OpenDownloads();
+        written += Shoot(downloadsHost, Path.Combine(dir, "08-downloads.png"), maps,
+                         ("active", 40, 130, 940, 190),
+                         ("history", 40, 330, 940, 220));
+        center.Items.Clear();                       // the seeds must not leak into the next shots
+
+
         // the app's own question box: built through the private constructor with reflection, shown
         // non-modally for the capture, because ShowDialog would sit here forever waiting for a click
         try

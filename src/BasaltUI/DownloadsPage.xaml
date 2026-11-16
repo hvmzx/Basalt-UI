@@ -64,7 +64,7 @@
                                     <DockPanel LastChildFill="False" Margin="0,6,0,0">
                                         <TextBlock DockPanel.Dock="Left" Text="{Binding Line}" Style="{StaticResource Label}"
                                                    TextTrimming="CharacterEllipsis" MaxWidth="560" />
-                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Started, StringFormat=added {0:HH:mm}}"
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding WhenText}"
                                                    Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}" />
                                     </DockPanel>
                                 </StackPanel>
