@@ -123,6 +123,7 @@ public partial class App : Application
             // a server started elsewhere has no console we can read, so its own log buffer fills the same pane
             foreach (var line in lines)
                 Vm.Append(line, LogSource.Server);
+            Vm.ExplainServerTrouble(lines);
         };
 
         ReloadConfig();

@@ -1251,6 +1251,36 @@ public sealed class MainViewModel : ObservableObject
     /// a served model also answers to its own file's name.</summary>
     private bool ServesFile(string file) => status.Models.Any(m => SameModelFile(m.Id, file));
 
+    // ---- the engine's failures, in the app's words -------------------------------------------------------
+    // The engine's log passes through as its own words. A RAM failure reads as a contradiction — the
+    // engine says the memory ran out, the RAM bar above says it did not — because the two count
+    // different things: the engine wants memory it can pin for the experts it keeps, the bar counts
+    // what Windows could hand out, file cache included. Once per model, the app says both figures
+    // and where the want comes from.
+    private readonly Dictionary<string, DateTime> ramSaidAt = new(StringComparer.OrdinalIgnoreCase);
+
+    public void ExplainServerTrouble(IReadOnlyList<string> lines) => OnUi(() =>
+    {
+        foreach (var line in lines)
+        {
+            var at = line.IndexOf(" did not load", StringComparison.OrdinalIgnoreCase);
+            if (at < 0)
+                continue;
+            var head = line[..at].Trim();
+            var model = head.StartsWith("error: ", StringComparison.Ordinal) ? head[7..].Trim() : head;
+            if (model.Length == 0)
+                continue;
+            if (ramSaidAt.TryGetValue(model, out var said) && DateTime.UtcNow - said < TimeSpan.FromMinutes(10))
+                continue;
+            ramSaidAt[model] = DateTime.UtcNow;
+            var free = machine.Memory.Usable - machine.Memory.InUse;
+            Append($"app: the engine could not load {model} — it could not get the RAM it keeps its experts pinned in" +
+                   (machine.Memory.Usable > 0 ? $" (windows counts {BasaltLocator.HumanBytes(free)} available right now; everything running shares it)" : "") +
+                   ". The entry's resident-experts switch decides how much RAM a load wants — the settings page can turn it off, " +
+                   "and the experts then read from the file as each request needs them", LogSource.App);
+        }
+    });
+
     /// <summary>The served row that carries this file, by the same pairing the card uses: the config's
     /// order while the counts agree, then the names.</summary>
     private ModelRow? ServedFaceOf(string file)
@@ -1713,6 +1743,23 @@ public sealed class MainViewModel : ObservableObject
             list.Add("experts read from disk — " + snapshot.Spill);
         if (snapshot.Swap is not null)
             list.Add(snapshot.Swap);
+        // A load the engine has said nothing about for a long time — no percent on /health, no end — is
+        // either reading the file slowly or waiting on its own memory check; the row only says "loading",
+        // so the warning says the other half. The buckets hold the words still, so the console says this
+        // three times an evening at most, not once a minute.
+        if (snapshot.Swap is not null && status.LoadPercent is not > 0)
+        {
+            var quiet = (DateTime.Now - swapSince).TotalMinutes;
+            var quietWords = quiet switch
+            {
+                > 120 => "more than two hours",
+                > 60 => "more than an hour",
+                > 30 => "more than half an hour",
+                _ => "",
+            };
+            if (quietWords.Length > 0)
+                list.Add($"no progress report from the engine in {quietWords} — it may be reading the file slowly, or waiting on its RAM check");
+        }
         if (snapshot.Gpus.FirstOrDefault() is { } gpu && gpu.Temp >= 80)
             list.Add($"GPU at {gpu.Temp:0} °C");
         if (snapshot.Gpus.FirstOrDefault() is { } g2 && g2.PowerLimit > 0 && g2.Power >= g2.PowerLimit * 0.97)
