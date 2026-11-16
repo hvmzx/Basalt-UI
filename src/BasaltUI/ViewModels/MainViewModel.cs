@@ -974,12 +974,15 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>Stop and start again. A stop that did not land means no restart: starting into a port that
-    /// is still held only adds a second server to fight the first. True when a start was attempted.</summary>
-    public async Task<bool> RestartAsync()
+    /// is still held only adds a second server to fight the first. True when a start was attempted. A
+    /// directed restart — a click that chose it — may end a server that ignores Ctrl+C; a plain one is
+    /// refused instead, because a server the app did not start is only ever stopped by the user's say-so.</summary>
+    public async Task<bool> RestartAsync(bool userDirected = false)
     {
         if (process.IsAlive)
         {
-            await StopAsync();
+            Append("app: stopping (Ctrl+C to the server)", LogSource.App);
+            await process.StopAsync(Settings.StopGraceSeconds, userDirected: userDirected);
             if (process.IsAlive)
             {
                 Append("app: the server did not stop — the restart is off; its own console keeps control",
@@ -1249,7 +1252,7 @@ public sealed class MainViewModel : ObservableObject
                 ? $"app: restarting — {name} loads first, the load under way is not kept"
                 : $"app: the engine only serves models its config listed at start — restarting with {file} aboard",
                    LogSource.App);
-            await RestartAsync();
+            await RestartAsync(userDirected: true);
             if (!process.IsAlive)
                 return;                                 // the restart did not happen: the log says what stopped it
         }

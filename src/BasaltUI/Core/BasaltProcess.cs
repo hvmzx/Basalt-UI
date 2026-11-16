@@ -200,9 +200,11 @@ public sealed class BasaltProcess : IDisposable
     // ---- stop --------------------------------------------------------------------------------------------
     /// <summary>
     /// True graceful stop: Ctrl+C into the server's console, so basalt sends QUIT to its engine and closes
-    /// cleanly. Only when that does not land do we terminate the tree.
+    /// cleanly. Only when that does not land do we terminate the tree — always for a server we started,
+    /// and for an adopted one only when the user directed this very stop (a restart pick names the server
+    /// to replace; leaving it running would leave the port held and the restart nothing).
     /// </summary>
-    public async Task<bool> StopAsync(int graceSeconds, bool force = false)
+    public async Task<bool> StopAsync(int graceSeconds, bool force = false, bool userDirected = false)
     {
         int pid;
         int[] kids;
@@ -245,10 +247,10 @@ public sealed class BasaltProcess : IDisposable
             await Task.Delay(150);
         }
 
-        if (!owned)
+        if (!owned && !userDirected)
         {
-            // Not our child: sending Ctrl+C was a favour the user asked for. Killing somebody else's
-            // server, or everything under it, is not ours to decide.
+            // Not our child, and nobody here directed this stop: sending Ctrl+C was a favour the user
+            // asked for. Killing somebody else's server, or everything under it, is not ours to decide.
             Notice?.Invoke("that server did not stop and is not ours to terminate — leaving it alone");
             lock (gate)
             {
@@ -259,7 +261,9 @@ public sealed class BasaltProcess : IDisposable
             return false;
         }
 
-        Notice?.Invoke($"still running after {seconds} s — terminating the process tree");
+        Notice?.Invoke(!owned
+            ? "the server this restart replaces did not answer Ctrl+C — ending it forcibly, as the restart asked"
+            : $"still running after {seconds} s — terminating the process tree");
         ForceKillTree(pid);
         for (var i = 0; i < 40 && IsAlive; i++)
             await Task.Delay(100);
