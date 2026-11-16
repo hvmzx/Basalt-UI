@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Input;
 using BasaltUI.Core;
@@ -1075,37 +1076,37 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// A file clicked in the Models card that the engine does not serve. With the server answering, the
-    /// switch is tried anyway — the engine's answer lands in the log either way. While stopped, the config
-    /// gets the say: a model entry that already points at the file means starting basalt loads it, so that
-    /// is what the click does; no entry yet is the only case the click cannot answer itself.
+    /// A file clicked in the Models card. The engine only serves what its config listed when it started, so
+    /// the click answers itself by pointing the config at the file when no entry already does: a running
+    /// server restarts with the file aboard and the switch then finds it, a stopped one starts with it. A
+    /// file the engine already serves switches in place, no restart.
     /// </summary>
     public async Task OpenLocalModel(string file)
     {
-        if (status.Reachable)
+        if (status.Reachable && ServesFile(file))
         {
             await SwitchModelAsync(file);
             return;
         }
 
-        var configured = getConfig()?.ModelEntries()
-            .Any(e => SameModelFile(ConfigDocument.Text(e, "model"), file)) == true;
-        if (!configured)
+        if (!PointConfigAt(file))
+            return;                                             // no config, or the save failed: the log says which
+
+        if (status.Reachable)
         {
-            Append($"model: {file} is in the models folder — Settings → Models can point a model at the file, " +
-                   "and basalt has to be running to load it", LogSource.App);
-            Notice?.Invoke($"{file} needs a model entry — open Settings → Models");
-            SettingsOpened?.Invoke();
-            return;
+            Append($"app: the engine only serves models its config listed at start — restarting with {file} aboard",
+                   LogSource.App);
+            await RestartAsync();
+        }
+        else
+        {
+            Append($"app: starting basalt — {file} is in the config, it loads as the server comes up", LogSource.App);
+            if (!await StartAsync())
+                return;                                         // the start checks already said what stopped it
         }
 
-        Append($"app: starting basalt — {file} is in the config, it loads as the server comes up", LogSource.App);
-        if (!await StartAsync())
-            return;                                             // the start checks already said what stopped it
-
-        // The engine loads its config's models on its own; wait a little for it to answer before judging
-        // whether anything more is needed. Answering with nothing loading or loaded is the one case where
-        // the switch is still worth trying — its answer lands in the log either way.
+        // The engine answers on its own, loading its config's first model; wait for it, then switch this file
+        // in — it is configured now, so the switch finds it, and the answer lands in the log either way.
         for (var waited = 0; waited < 20 && !status.Reachable; waited++)
             await Task.Delay(1000);
         if (!status.Reachable)
@@ -1114,8 +1115,50 @@ public sealed class MainViewModel : ObservableObject
                    LogSource.App);
             return;
         }
-        if (!status.Loaded && !status.Loading)
-            await SwitchModelAsync(file);
+        await SwitchModelAsync(Path.GetFileName(file));
+    }
+
+    /// <summary>Does anything the server serves answer to this file's name? Its list carries pack names, but
+    /// a served model also answers to its own file's name.</summary>
+    private bool ServesFile(string file) => status.Models.Any(m => SameModelFile(m.Id, file));
+
+    /// <summary>
+    /// Make sure the engine's config lists the file, adding an entry and saving when none points at it. The
+    /// new entry keeps the settings of the first one — kv, context, gpu, the rest — so a downloaded pack is
+    /// served the way the configured one is; basalt's own defaults would be a second, unconsidered choice.
+    /// </summary>
+    private bool PointConfigAt(string file)
+    {
+        var cfg = getConfig();
+        if (cfg is null)
+        {
+            Append("no config file — pick one in Settings → Paths first", LogSource.Error);
+            return false;
+        }
+        if (cfg.ModelEntries().Any(e => SameModelFile(ConfigDocument.Text(e, "model"), file)))
+            return true;
+
+        var full = Path.IsPathRooted(file) ? file
+                 : Settings.ModelsFolder.Length > 0 ? Path.Combine(Settings.ModelsFolder, file)
+                 : file;
+        var model = full.Replace('\\', '/');
+
+        var entry = cfg.ModelEntries().FirstOrDefault() is { } first ? (JsonObject)first.DeepClone() : new JsonObject();
+        entry["model"] = model;
+        entry.Remove("alias");                                  // a copied alias would serve the new file under the old name
+        cfg.Models.Add(entry);
+        try
+        {
+            cfg.Save();
+            reopenConfig();                                     // the app re-reads what was just written
+            Append($"config: model entry added — {model}", LogSource.App);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Append("could not save the config: " + ex.Message, LogSource.Error);
+            return false;
+        }
     }
 
     /// <summary>Does a config model entry's path point at this file? The entry may carry a full path or a name,

@@ -352,7 +352,7 @@
                             </TextBlock>
                         </Grid>
 
-                        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="True">
+                        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="False">
                             <Button DockPanel.Dock="Right" Content="Switch" Click="SwitchModel_Click"
                                     IsEnabled="{Binding IsConnected}"
                                     Margin="8,0,0,0" MinWidth="70"

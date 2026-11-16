@@ -134,16 +134,19 @@ public sealed record ServerStatus
 /// </summary>
 public sealed class BasaltClient
 {
-    private static readonly HttpClient Http = Create();
+    private static readonly HttpClient Http = Create(TimeSpan.FromSeconds(2.5));
+    /// <summary>A load or unload blocks for the whole weights load — minutes for a big pack — so the control
+    /// posts get a client with room to wait. The polls keep the short one: a hung poll must not stall the panel.</summary>
+    private static readonly HttpClient Slow = Create(TimeSpan.FromMinutes(15));
 
-    private static HttpClient Create()
+    private static HttpClient Create(TimeSpan timeout)
     {
         var handler = new SocketsHttpHandler
         {
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
             MaxConnectionsPerServer = 4,
         };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(2.5) };
+        var client = new HttpClient(handler) { Timeout = timeout };
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         return client;
     }
@@ -236,7 +239,7 @@ public sealed class BasaltClient
                 request.Headers.Add("Authorization", "Bearer " + ApiKey);
             request.Content = new StringContent(jsonBody ?? "{}", Encoding.UTF8, "application/json");
 
-            using var response = await Http.SendAsync(request, ct);
+            using var response = await Slow.SendAsync(request, ct);
             var body = await response.Content.ReadAsStringAsync(ct);
             var detail = body.Length > 240 ? body[..240] + "…" : body;
             return (response.IsSuccessStatusCode, (int)response.StatusCode + " " + detail.ReplaceLineEndings(" "));
