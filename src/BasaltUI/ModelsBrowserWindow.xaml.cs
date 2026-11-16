@@ -330,13 +330,6 @@ public partial class ModelsBrowserWindow : Window
         if (wanted.Count == 0)
             return;
 
-        var total = wanted.Sum(r => Math.Max(0, r.File.Size));
-        var ask = MessageBox.Show(this,
-                                  $"About {BasaltLocator.HumanBytes(total)} across {wanted.Count} file{(wanted.Count == 1 ? "" : "s")}, into\n\n{Settings.ModelsFolder}\n\nThis can take a while; it carries on if the window closes by accident, because what came down is kept.",
-                                  "Download", MessageBoxButton.OKCancel, MessageBoxImage.Question);
-        if (ask != MessageBoxResult.OK)
-            return;
-
         await Pull(wanted);
     }
 
