@@ -140,7 +140,10 @@ public sealed class BasaltClient
     /// <summary>A load blocks this POST until the weights are in: a cold 80 GB read from disk has taken
     /// past fifteen minutes, so the ceiling is half an hour — a cancel here would say "canceled" while
     /// the engine carries on loading anyway.</summary>
-    private static readonly HttpClient Slow = Create(TimeSpan.FromMinutes(30));
+    /// <summary>A control call waits for its turn behind every load ahead of it — a cold 80 GB read has
+    /// taken past an hour — so no ceiling: the call ends when the engine grants it or the connection
+    /// drops. A ceiling here only says "canceled" while the engine loads on regardless.</summary>
+    private static readonly HttpClient Slow = Create(Timeout.InfiniteTimeSpan);
 
     private static HttpClient Create(TimeSpan timeout)
     {

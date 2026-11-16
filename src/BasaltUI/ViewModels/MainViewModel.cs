@@ -1124,10 +1124,12 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// A file clicked in the Models card. The engine only serves what its config listed when it started, so
-    /// the click makes the config carry the file: an entry that is already there switches in place, a new
-    /// one is asked for first — another entry's settings with the path replaced, or basalt's own defaults —
-    /// and then a running server restarts with the file aboard, a stopped one starts with it.
+    /// A file clicked in the Models card. The engine only serves what its config listed when it started, and
+    /// it loads one model at a time, so the click makes the config carry the file and gets the model its
+    /// turn: an entry that is already there switches in place — unless another model's load is under way,
+    /// which is asked about, because standing in line behind an hour-long read is a decision, not a default —
+    /// a new one is asked for first (another entry's settings with the path replaced, or basalt's own
+    /// defaults), and then a running server restarts with the file aboard, a stopped one starts with it.
     /// </summary>
     public async Task OpenLocalModel(string file)
     {
@@ -1139,14 +1141,41 @@ public sealed class MainViewModel : ObservableObject
         }
         var entries = cfg.ModelEntries();
         var entryIndex = entries.FindIndex(e => SameModelFile(ConfigDocument.Text(e, "model"), file));
+        var name = Path.GetFileName(file);
 
         // In the config and the running server serves it (its list is in the config's order, so the entry's
         // face is known while the counts agree; a name match is the fallback)? Then the switch answers in
         // place, no restart.
         var served = entryIndex >= 0 && (status.Models.Count == entries.Count || ServesFile(file));
-        if (status.Reachable && served)
+
+        // Another model's load under way? The engine grants turns one at a time, so this click either
+        // stands in line behind it — minutes, or most of an hour — or a restart brings this model first
+        // and the running load is thrown away. That trade is the click's to make, not ours.
+        var jump = false;
+        if (status.Reachable && BusyLoadingOther(file))
         {
-            await SwitchModelAsync(Path.GetFileName(file));
+            var options = new List<string>();
+            if (served)
+                options.Add("wait — the switch keeps its place in line, it loads when the running load ends");
+            options.Add($"restart — {name} loads first, the load under way is thrown away");
+            if (!served)
+                options.Add("step back — do nothing for now");
+            var pick = Dialog.Choose(null, "A load is already under way", BusyWords(file), options);
+            if (pick is null)
+                return;                                         // the click stepped back
+            if (pick == options[0] && served)
+            {
+                await SwitchModelAsync(name);
+                return;
+            }
+            if (pick == options[^1] && !served)
+                return;                                         // the click stepped back
+            jump = true;                                        // the restart option
+        }
+
+        if (status.Reachable && served && !jump)
+        {
+            await SwitchModelAsync(name);
             return;
         }
 
@@ -1185,7 +1214,9 @@ public sealed class MainViewModel : ObservableObject
 
         if (status.Reachable)
         {
-            Append($"app: the engine only serves models its config listed at start — restarting with {file} aboard",
+            Append(jump
+                ? $"app: restarting — {name} loads first, the load under way is not kept"
+                : $"app: the engine only serves models its config listed at start — restarting with {file} aboard",
                    LogSource.App);
             await RestartAsync();
             if (!process.IsAlive)
@@ -1219,6 +1250,49 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>Does anything the server serves answer to this file's name? Its list carries pack names, but
     /// a served model also answers to its own file's name.</summary>
     private bool ServesFile(string file) => status.Models.Any(m => SameModelFile(m.Id, file));
+
+    /// <summary>The served row that carries this file, by the same pairing the card uses: the config's
+    /// order while the counts agree, then the names.</summary>
+    private ModelRow? ServedFaceOf(string file)
+    {
+        var name = Path.GetFileName(file);
+        var served = status.Models;
+        var entries = status.Reachable ? getConfig()?.ModelEntries() : null;
+        if (entries is not null && served.Count == entries.Count)
+        {
+            for (var i = 0; i < entries.Count; i++)
+                if (SameModelFile(ConfigDocument.Text(entries[i], "model"), file))
+                    return served[i];
+        }
+        return served.FirstOrDefault(m => SameModelFile(m.Id, name) ||
+                                          Stem(m.Id).Equals(Stem(name), StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>Is a load of some other model in flight — one this file would stand behind? The engine
+    /// grants turns one at a time; while another model's weights are still coming in, a switch waits.
+    /// A load of this very model (its turn already granted) is not "other".</summary>
+    private bool BusyLoadingOther(string file)
+    {
+        if (status.Swap is not { } words)
+            return false;
+        var target = SwapTargetOf(words);
+        if (target.Length == 0 || target.Equals(Path.GetFileName(file), StringComparison.OrdinalIgnoreCase))
+            return false;
+        var face = ServedFaceOf(file);
+        return face is null || !target.Equals(face.Id, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The question the click answers when a load is under way: what is coming in, how long it
+    /// has been at it, and what the engine's own progress meter says when it says anything.</summary>
+    private string BusyWords(string file)
+    {
+        var target = SwapTargetOf(status.Swap ?? "");
+        var mins = (int)(DateTime.Now - swapSince).TotalMinutes;
+        var pct = status.LoadPercent is > 0 ? $", {status.LoadPercent:0}% read" : "";
+        return $"{target} is coming in right now ({(mins > 0 ? mins + " min so far" : "just started")}{pct}). " +
+               $"The engine loads one model at a time, so {Path.GetFileName(file)} would stand in line behind it — " +
+               "or a restart brings it first. A restart throws the running load away.";
+    }
 
     /// <summary>
     /// A file with no entry in the config yet: the entry decides how the model is served — kv, context,
@@ -1601,12 +1675,21 @@ public sealed class MainViewModel : ObservableObject
     /// renew it.</summary>
     private string? swapSaidTo;
 
+    /// <summary>When the swap now under way began, as far as the app can tell: the beat its target last
+    /// changed. What the click dialog quotes as "so far".</summary>
+    private DateTime swapSince = DateTime.Now;
+    private string swapTargetSeen = "";
+
     /// <summary>The model the swap's human words are heading for: after "→ " for a hand-over, after
     /// "loading " for a cold one.</summary>
     private static string SwapTargetOf(string words)
     {
+        if (words.Length == 0)
+            return "";
         var at = words.IndexOf("→", StringComparison.Ordinal);
         var start = at >= 0 ? at + 1 : "loading ".Length;
+        if (start >= words.Length)
+            return words;
         while (start < words.Length && words[start] == ' ')
             start++;
         var end = words.IndexOf(" —", StringComparison.Ordinal);
@@ -1617,6 +1700,14 @@ public sealed class MainViewModel : ObservableObject
 
     private void RebuildWarnings(ServerStatus snapshot)
     {
+        // the swap's target changing is the clock reset for "how long has it been at it"
+        var target = snapshot.Swap is { } words ? SwapTargetOf(words) : "";
+        if (!target.Equals(swapTargetSeen, StringComparison.Ordinal))
+        {
+            swapTargetSeen = target;
+            swapSince = DateTime.Now;
+        }
+
         var list = new List<string>();
         if (!string.IsNullOrEmpty(snapshot.Spill))
             list.Add("experts read from disk — " + snapshot.Spill);
@@ -1660,8 +1751,8 @@ public sealed class MainViewModel : ObservableObject
         // A swap is said once when it starts (the line above does that, its words hold still while the
         // model comes in) and once when it ends. A swap that ends while the server is gone says nothing —
         // the stop already had its lines.
-        if (snapshot.Swap is { } words)
-            swapSaidTo = SwapTargetOf(words) is { Length: > 0 } to ? to : swapSaidTo;
+        if (target.Length > 0)
+            swapSaidTo = target;
         else if (swapSaidTo is not null)
         {
             var to = swapSaidTo;
