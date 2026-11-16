@@ -373,7 +373,7 @@ public partial class ModelsBrowserWindow : Window
     private void RefreshTransfer()
     {
         var item = app.Downloads.Current;
-        PauseButton.Visibility = item is { State: "downloading" } ? Visibility.Visible : Visibility.Collapsed;
+        PauseButton.Visibility = item is { State: "downloading" or "queued" } ? Visibility.Visible : Visibility.Collapsed;
         if (item is null)
         {
             JobText.Text = "nothing on its way — downloads live in the centre, bottom of the main page";

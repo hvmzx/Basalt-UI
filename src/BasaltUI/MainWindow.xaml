@@ -414,40 +414,40 @@
         </Border>
 
         <!-- ============ footer ============ -->
-        <DockPanel Grid.Row="3" LastChildFill="False" Margin="20,10,20,10">
-            <!-- bottom left: which basalt this machine runs, green when it is the newest, yellow when not,
-                 and the whole thing is the update button -->
-            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center"
-                        Cursor="Hand" Background="Transparent"
-                        MouseLeftButtonUp="UpdateDot_Click" ToolTip="{Binding UpdateDotTip}">
-                <Ellipse Width="8" Height="8" VerticalAlignment="Center">
-                    <Ellipse.Style>
-                        <Style TargetType="{x:Type Ellipse}">
-                            <Setter Property="Fill" Value="{DynamicResource Good}" />
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding UpdateAvailable}" Value="True">
-                                    <Setter Property="Fill" Value="{DynamicResource Warn}" />
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </Ellipse.Style>
-                </Ellipse>
-                <TextBlock Text="{Binding EngineVersionLabel}" Style="{StaticResource Label}" Margin="7,0,0,0" />
-            </StackPanel>
-            <TextBlock DockPanel.Dock="Left" Text="{Binding UptimeText}" Style="{StaticResource Label}"
-                       Foreground="{DynamicResource TextFaint}" Margin="16,0,0,0" />
-            <TextBlock DockPanel.Dock="Left" Text="{Binding LastSeenText}" Style="{StaticResource Label}"
-                       Foreground="{DynamicResource TextFaint}" Margin="16,0,0,0" />
-            <TextBlock DockPanel.Dock="Right" Text="{Binding Log.Count, StringFormat={}{0} lines}"
-                       Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}" />
-            <!-- centre: the downloads centre. Every transfer the app starts lives there, and the word
-                 counts what is on its way. -->
+        <Grid Grid.Row="3" Margin="20,10,20,10">
+            <DockPanel LastChildFill="False">
+                <!-- bottom left: which basalt this machine runs, green when it is the newest, yellow when
+                     not, and the whole thing is the update button -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center"
+                            Cursor="Hand" Background="Transparent"
+                            MouseLeftButtonUp="UpdateDot_Click" ToolTip="{Binding UpdateDotTip}">
+                    <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                        <Ellipse.Style>
+                            <Style TargetType="{x:Type Ellipse}">
+                                <Setter Property="Fill" Value="{DynamicResource Good}" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding UpdateAvailable}" Value="True">
+                                        <Setter Property="Fill" Value="{DynamicResource Warn}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
+                    <TextBlock Text="{Binding EngineVersionLabel}" Style="{StaticResource Label}" Margin="7,0,0,0" />
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Left" Text="{Binding UptimeText}" Style="{StaticResource Label}"
+                           Foreground="{DynamicResource TextFaint}" Margin="16,0,0,0" />
+                <TextBlock DockPanel.Dock="Right" Text="{Binding Log.Count, StringFormat={}{0} lines}"
+                           Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}" />
+            </DockPanel>
+            <!-- centre, over the panel: the downloads centre. Every transfer the app starts lives there,
+                 and the word counts what is on its way. -->
             <TextBlock x:Name="DownloadsLink" Text="Downloads" Style="{StaticResource Label}"
                        Foreground="{DynamicResource TextSecondary}" Cursor="Hand" Background="Transparent"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
                        MouseLeftButtonUp="Downloads_Click"
                        ToolTip="The downloads centre — what is coming down now, and what came down before" />
-        </DockPanel>
+        </Grid>
             </Grid>
         </Grid>
     </Grid>

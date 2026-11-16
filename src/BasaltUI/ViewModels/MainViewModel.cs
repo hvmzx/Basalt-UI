@@ -341,9 +341,6 @@ public sealed class MainViewModel : ObservableObject
 
     private void RaiseDisplay() => RaiseAll(DisplayProps);
 
-    /// <summary>How long since the app last heard from the server, for the footer.</summary>
-    public string LastSeenText => status.Reachable ? "updated " + status.SeenAt.ToString("HH:mm:ss") : "";
-
     public ObservableCollection<RequestRow> Recent { get; } = [];
     public ObservableCollection<ModelRow> ModelRows { get; } = [];
 
@@ -1152,7 +1149,7 @@ public sealed class MainViewModel : ObservableObject
         Status = snapshot;
         machine = poller.Machine;       // read on the same beat, off the UI thread: Windows' own figures
         RaiseAll(nameof(DecodeSeries), nameof(PrefillSeries), nameof(GpuUtilSeries), nameof(GpuPowerSeries),
-                 nameof(GpuTempSeries), nameof(LastSeenText));
+                 nameof(GpuTempSeries));
         RaiseDisplay();
         Raise(nameof(StatusText));
         Raise(nameof(VersionText));

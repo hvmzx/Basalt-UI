@@ -30,12 +30,14 @@ public partial class DownloadsPage : UserControl
     {
         var center = App.Downloads;
         var active = center.ActiveCount;
-        CountText.Text = active switch
-        {
-            0 => $"{center.Items.Count} finished or stopped — new downloads land in {App.Settings.ModelsFolder}",
-            1 => "1 download on its way",
-            var n => $"{n} downloads on their way, one at a time",
-        };
+        CountText.Text = center.Items.Count == 0
+            ? $"nothing downloaded yet — new downloads land in {App.Settings.ModelsFolder}"
+            : active switch
+            {
+                0 => $"{center.Items.Count} finished or stopped — new downloads land in {App.Settings.ModelsFolder}",
+                1 => "1 download on its way",
+                var n => $"{n} downloads on their way, one at a time",
+            };
     }
 
     // ---- buttons ---------------------------------------------------------------------------------------------

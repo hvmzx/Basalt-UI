@@ -45,7 +45,8 @@ public sealed class DownloadItem : BasaltUI.ViewModels.ObservableObject
         set
         {
             if (Set(ref state, value))
-                RaiseAll(nameof(IsQueued), nameof(IsDownloading), nameof(IsPaused), nameof(IsDoneOrFailed));
+                RaiseAll(nameof(IsQueued), nameof(IsDownloading), nameof(IsPaused), nameof(IsFailed),
+                         nameof(IsDoneOrFailed), nameof(Active), nameof(CanResume));
         }
     }
 
@@ -53,7 +54,11 @@ public sealed class DownloadItem : BasaltUI.ViewModels.ObservableObject
     public bool IsQueued => State == "queued";
     public bool IsDownloading => State == "downloading";
     public bool IsPaused => State == "paused";
+    public bool IsFailed => State == "failed";
     public bool IsDoneOrFailed => State is "finished" or "failed";
+
+    /// <summary>A paused one carries on; a failed one is worth another try — the checkpoint keeps the bytes.</summary>
+    public bool CanResume => State is "paused" or "failed";
 
     private long done;
     public long DoneBytes

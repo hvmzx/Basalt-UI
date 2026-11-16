@@ -25,7 +25,7 @@
             <TextBlock DockPanel.Dock="Left" x:Name="CountText" Text="" Style="{StaticResource Label}"
                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="620" />
             <Button DockPanel.Dock="Right" Content="Open models folder" Click="OpenFolder_Click" />
-            <Button DockPanel.Dock="Right" Content="Clear finished" Click="ClearHistory_Click" Margin="8,0,0,0"
+            <Button DockPanel.Dock="Right" Content="Clear finished" Click="ClearHistory_Click" Margin="0,0,8,0"
                     ToolTip="Take the finished and failed ones out of the list; nothing on disk is deleted" />
         </DockPanel>
 
@@ -64,7 +64,7 @@
                                     <DockPanel LastChildFill="False" Margin="0,6,0,0">
                                         <TextBlock DockPanel.Dock="Left" Text="{Binding Line}" Style="{StaticResource Label}"
                                                    TextTrimming="CharacterEllipsis" MaxWidth="560" />
-                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Started, StringFormat=queued {0:HH:mm}}"
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Started, StringFormat=added {0:HH:mm}}"
                                                    Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}" />
                                     </DockPanel>
                                 </StackPanel>
@@ -72,14 +72,12 @@
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Content="Pause" Click="Pause_Click" Tag="{Binding}"
                                             Margin="0,0,6,0" MinWidth="64"
-                                            Visibility="{Binding IsDownloading, Converter={x:Static cv:BoolToVisibility.Instance}}" />
+                                            Visibility="{Binding Active, Converter={x:Static cv:BoolToVisibility.Instance}}"
+                                            ToolTip="Stop the transfer — it carries on from where the bytes stopped" />
                                     <Button Content="Resume" Click="Resume_Click" Tag="{Binding}"
                                             Margin="0,0,6,0" MinWidth="64"
-                                            Visibility="{Binding IsPaused, Converter={x:Static cv:BoolToVisibility.Instance}}" />
-                                    <Button Content="Retry" Click="Resume_Click" Tag="{Binding}"
-                                            Margin="0,0,6,0" MinWidth="64"
-                                            Visibility="{Binding IsQueued, Converter={x:Static cv:BoolToVisibility.Instance}}"
-                                            ToolTip="Put it at the head of the queue" />
+                                            Visibility="{Binding CanResume, Converter={x:Static cv:BoolToVisibility.Instance}}"
+                                            ToolTip="Carry on from where the bytes stopped" />
                                     <Button Content="Remove" Click="Remove_Click" Tag="{Binding}" MinWidth="64"
                                             Visibility="{Binding IsDoneOrFailed, Converter={x:Static cv:BoolToVisibility.Instance}}"
                                             ToolTip="Take it out of the list; the file it finished stays on disk" />
