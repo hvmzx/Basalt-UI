@@ -1290,15 +1290,28 @@ public sealed class MainViewModel : ObservableObject
     // and where the want comes from.
     private readonly Dictionary<string, DateTime> ramSaidAt = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>When the engine's own log last said anything, and whether it has said anything at all:
+    /// the silence a stalled load is judged by. The engine prints through every read and placement, so
+    /// minutes of nothing while a load is "under way" is the honest signal.</summary>
+    private DateTime engineWordsAt = DateTime.MinValue;
+    private bool engineWordsSeen;
+
     public void ExplainServerTrouble(IReadOnlyList<string> lines) => OnUi(() =>
     {
+        engineWordsAt = DateTime.UtcNow;                    // the engine said something: it is not silent
+        engineWordsSeen = true;
         foreach (var line in lines)
         {
             var at = line.IndexOf(" did not load", StringComparison.OrdinalIgnoreCase);
             if (at < 0)
                 continue;
+            // the line carries the engine's own tags and error prefixes — "[srv/err] error: …" — and
+            // sometimes more than one; the model is whatever is left after the last of them
             var head = line[..at].Trim();
-            var model = head.StartsWith("error: ", StringComparison.Ordinal) ? head[7..].Trim() : head;
+            for (var e = head.IndexOf("error: ", StringComparison.OrdinalIgnoreCase); e >= 0;
+                 e = head.IndexOf("error: ", StringComparison.OrdinalIgnoreCase))
+                head = head[(e + 7)..].Trim();
+            var model = head;
             if (model.Length == 0)
                 continue;
             if (ramSaidAt.TryGetValue(model, out var said) && DateTime.UtcNow - said < TimeSpan.FromMinutes(10))
@@ -1778,13 +1791,13 @@ public sealed class MainViewModel : ObservableObject
             list.Add("experts read from disk — " + snapshot.Spill);
         if (snapshot.Swap is not null)
             list.Add(snapshot.Swap);
-        // A load the engine has said nothing about for a long time — no percent on /health, no end — is
-        // either reading the file slowly or waiting on its own memory check; the row only says "loading",
-        // so the warning says the other half. The buckets hold the words still, so the console says this
-        // three times an evening at most, not once a minute.
-        if (snapshot.Swap is not null && status.LoadPercent is not > 0)
+        // A load the engine has gone silent about — no percent on /health, no end, and nothing in its
+        // own log either — is either reading the file slowly or waiting on its memory check; the row
+        // only says "loading", so the warning says the other half. The buckets hold the words still,
+        // so the console says this three times an evening at most, not once a minute.
+        if (snapshot.Swap is not null && status.LoadPercent is not > 0 && engineWordsSeen)
         {
-            var quiet = (DateTime.Now - swapSince).TotalMinutes;
+            var quiet = (DateTime.UtcNow - engineWordsAt).TotalMinutes;
             var quietWords = quiet switch
             {
                 > 120 => "more than two hours",
