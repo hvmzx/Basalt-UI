@@ -1150,27 +1150,48 @@ public sealed class MainViewModel : ObservableObject
 
         // Another model's load under way? The engine grants turns one at a time, so this click either
         // stands in line behind it — minutes, or most of an hour — or a restart brings this model first
-        // and the running load is thrown away. That trade is the click's to make, not ours.
+        // and the running load is thrown away. That trade is the click's to make, not ours — but once
+        // per load: an answer already given for this very load is applied again without asking, or a
+        // click that only re-reads the card would ask the same question once a minute.
         var jump = false;
+        var swapWords = status.Swap ?? "";
+        var swapTarget = SwapTargetOf(swapWords);
         if (status.Reachable && BusyLoadingOther(file))
         {
-            var options = new List<string>();
-            if (served)
-                options.Add("wait — the switch keeps its place in line, it loads when the running load ends");
-            options.Add($"restart — {name} loads first, the load under way is thrown away");
-            if (!served)
-                options.Add("step back — do nothing for now");
-            var pick = Dialog.Choose(null, "A load is already under way", BusyWords(file), options);
-            if (pick is null)
-                return;                                         // the click stepped back
-            if (pick == options[0] && served)
+            if (busyAnswered.TryGetValue(file, out var prior) && prior.Target == swapTarget)
             {
-                await SwitchModelAsync(name);
-                return;
+                if (!prior.Restart)
+                {
+                    Append($"app: {name} is already in line — it loads when the load under way ends", LogSource.App);
+                    return;
+                }
+                jump = true;                                    // answered restart, still not through: again, silently
             }
-            if (pick == options[^1] && !served)
-                return;                                         // the click stepped back
-            jump = true;                                        // the restart option
+            else
+            {
+                var untracked = !process.IsAlive && ForeignPids.Length > 0;
+                var options = new List<string>();
+                if (served)
+                    options.Add("wait — the switch keeps its place in line, it loads when the running load ends");
+                options.Add(untracked
+                    ? $"take the running server over and restart — {name} loads first, the load under way is thrown away"
+                    : $"restart — {name} loads first, the load under way is thrown away");
+                if (!served)
+                    options.Add("step back — do nothing for now");
+                var pick = Dialog.Choose(null, "A load is already under way", BusyWords(file), options);
+                if (pick is null)
+                    return;                                     // the click stepped back: ask again next time
+                if (pick == options[0] && served)
+                {
+                    busyAnswered[file] = (swapTarget, Restart: false);
+                    await SwitchModelAsync(name);
+                    return;
+                }
+                if (pick == options[^1] && !served)
+                    return;                                     // the click stepped back: ask again next time
+                busyAnswered[file] = (swapTarget, Restart: true);
+                jump = true;                                    // the restart option
+            }
         }
 
         if (status.Reachable && served && !jump)
@@ -1214,6 +1235,16 @@ public sealed class MainViewModel : ObservableObject
 
         if (status.Reachable)
         {
+            // A restart stops the server through this app's own books; a server it never started is
+            // adopted first — the restart choice above is the user's say-so, the same "watch it" the
+            // banner asks for.
+            if (!process.IsAlive && ForeignPids.Length > 0)
+            {
+                var pid = ForeignPids[0];
+                Append($"app: the restart stops the server through this app, so the one answering (pid {pid}) is watched first", LogSource.App);
+                AdoptExternal(pid);
+                SetForeign([]);
+            }
             Append(jump
                 ? $"app: restarting — {name} loads first, the load under way is not kept"
                 : $"app: the engine only serves models its config listed at start — restarting with {file} aboard",
@@ -1297,6 +1328,10 @@ public sealed class MainViewModel : ObservableObject
         return served.FirstOrDefault(m => SameModelFile(m.Id, name) ||
                                           Stem(m.Id).Equals(Stem(name), StringComparison.OrdinalIgnoreCase));
     }
+
+    /// <summary>The load a click was asked about, and what was answered, per file: the same load is not
+    /// asked about twice. The entry clears itself when the load ends and something else takes the port.</summary>
+    private readonly Dictionary<string, (string Target, bool Restart)> busyAnswered = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Is a load of some other model in flight — one this file would stand behind? The engine
     /// grants turns one at a time; while another model's weights are still coming in, a switch waits.
