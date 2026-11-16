@@ -990,7 +990,20 @@ public sealed class MainViewModel : ObservableObject
                 return false;
             }
         }
-        return await StartAsync();
+        var started = await StartAsync();
+        if (started && userDirected && !process.IsAlive)
+        {
+            // A start that follows a forced end can die in its first seconds: windows is still settling
+            // the tree just ended, and the fresh server's own first child fails to spawn — the engine
+            // then reports a config check it could not run and exits. The teardown is over in moments,
+            // so one quiet retry turns that into a normal start.
+            Append("app: the fresh server died as it started — the one just ended is still being settled; starting once more",
+                   LogSource.App);
+            await Task.Delay(TimeSpan.FromSeconds(5));
+            if (!process.IsAlive)
+                started = await StartAsync();
+        }
+        return started;
     }
 
     /// <summary>Load or unload the model in place, without touching the process.</summary>
