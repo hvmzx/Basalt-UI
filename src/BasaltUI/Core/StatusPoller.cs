@@ -84,7 +84,9 @@ public sealed class StatusPoller : IDisposable
                     MaxContext = health.MaxContext > 0 ? health.MaxContext : before.MaxContext,
                     Images = health.Images,
                     ApiKeyRequired = health.ApiKeyRequired,
-                    Swap = health.Swap ?? before.Swap,
+                    // the swap ends when the engine stops reporting it — not carried forward from an
+                    // older beat, or a finished swap would sit on the dashboard forever
+                    Swap = health.Swap,
                     LoadPercent = health.Percent ?? before.LoadPercent,
                 };
             }

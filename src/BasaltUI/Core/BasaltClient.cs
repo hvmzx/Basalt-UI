@@ -323,7 +323,7 @@ public sealed record HealthResult(bool Ok, string State, string Model, bool Load
             MaxContext: root.Get("max_context").L(),
             Images: root.Get("images").B(),
             ApiKeyRequired: root.Get("api_key").B(),
-            Swap: root.Get("swap") is { } s && s.ValueKind != JsonValueKind.Null ? s.ToString() : null);
+            Swap: ServerStatusParser.DescribeSwap(root.Get("swap")));
     }
 }
 
@@ -467,8 +467,10 @@ internal static class ServerStatusParser
         return 0;
     }
 
-    /// <summary>swap is {"from","to","phase","waiting"} while one model gives way to another.</summary>
-    private static string? DescribeSwap(JsonElement? el)
+    /// <summary>swap is {"from","to","phase","waiting"} while one model gives way to another. The elapsed
+    /// seconds the engine also reports are left out on purpose: they change every second, and a warning
+    /// whose words change every second is said again every second.</summary>
+    internal static string? DescribeSwap(JsonElement? el)
     {
         if (el is not { } e || e.ValueKind != JsonValueKind.Object)
             return null;
@@ -476,7 +478,10 @@ internal static class ServerStatusParser
         var to = e.Get("to").S("?");
         var phase = e.Get("phase").S();
         var waiting = e.Get("waiting").I();
-        return waiting > 0 ? $"swapping {from} → {to} ({phase}, {waiting} waiting)" : $"swapping {from} → {to} ({phase})";
+        var fresh = string.IsNullOrEmpty(from) || from == "?";   // no model gave way: this is a cold load
+        var head = fresh ? $"loading {to}" : $"swapping {from} → {to}";
+        var tail = fresh && (phase.Length == 0 || phase == "loading") ? "" : $" ({phase})";
+        return waiting > 0 ? $"{head} — {waiting} waiting{tail}" : $"{head}{tail}";
     }
 
     /// <summary>engine.spill names the tier experts are read from; the bytes are the size the stats page shows.</summary>

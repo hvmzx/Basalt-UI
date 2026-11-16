@@ -1159,6 +1159,30 @@ public sealed class MainViewModel : ObservableObject
                 return;                                         // the save failed: the log says what stopped it
         }
 
+        // The engine preloads the config's first model as it comes up, and this start is about the file
+        // that was just clicked — so its entry moves to the front and the preload is the model that was
+        // asked for, not whatever happened to sit there. The entries, and their settings, keep their
+        // order otherwise; nothing about a model changes but its place in line.
+        var now = getConfig();
+        var moved = now?.ModelEntries().FirstOrDefault(e => SameModelFile(ConfigDocument.Text(e, "model"), file));
+        if (now is not null && moved is not null && now.Models.IndexOf(moved) > 0)
+        {
+            var arr = now.Models;
+            var at = arr.IndexOf(moved);
+            arr.RemoveAt(at);
+            arr.Insert(0, moved);
+            try
+            {
+                now.Save();
+                Append($"{Path.GetFileName(file)} moves to the front of the config — it is the model this start preloads",
+                       LogSource.App);
+            }
+            catch (Exception ex)
+            {
+                Append("could not reorder the config: " + ex.Message, LogSource.Error);
+            }
+        }
+
         if (status.Reachable)
         {
             Append($"app: the engine only serves models its config listed at start — restarting with {file} aboard",
@@ -1572,6 +1596,25 @@ public sealed class MainViewModel : ObservableObject
         RebuildDisplay();
     }
 
+    /// <summary>The model a console-carried swap was heading for, or null while none is being said. The
+    /// swap is one event, said once going in and once coming out — the seconds it spends loading do not
+    /// renew it.</summary>
+    private string? swapSaidTo;
+
+    /// <summary>The model the swap's human words are heading for: after "→ " for a hand-over, after
+    /// "loading " for a cold one.</summary>
+    private static string SwapTargetOf(string words)
+    {
+        var at = words.IndexOf("→", StringComparison.Ordinal);
+        var start = at >= 0 ? at + 1 : "loading ".Length;
+        while (start < words.Length && words[start] == ' ')
+            start++;
+        var end = words.IndexOf(" —", StringComparison.Ordinal);
+        if (end < start)
+            end = words.IndexOf(" (", StringComparison.Ordinal);
+        return end > start ? words[start..end].Trim() : words[start..].Trim();
+    }
+
     private void RebuildWarnings(ServerStatus snapshot)
     {
         var list = new List<string>();
@@ -1613,6 +1656,19 @@ public sealed class MainViewModel : ObservableObject
         Warnings.Clear();
         foreach (var w in list)
             Warnings.Add(w);
+
+        // A swap is said once when it starts (the line above does that, its words hold still while the
+        // model comes in) and once when it ends. A swap that ends while the server is gone says nothing —
+        // the stop already had its lines.
+        if (snapshot.Swap is { } words)
+            swapSaidTo = SwapTargetOf(words) is { Length: > 0 } to ? to : swapSaidTo;
+        else if (swapSaidTo is not null)
+        {
+            var to = swapSaidTo;
+            swapSaidTo = null;
+            if (snapshot.Reachable)
+                Append($"app: the swap to {to} ended", LogSource.App);
+        }
     }
 
     private void RefreshCommands()
