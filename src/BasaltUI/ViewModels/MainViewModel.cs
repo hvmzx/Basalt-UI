@@ -931,6 +931,20 @@ public sealed class MainViewModel : ObservableObject
             }
         }
 
+        // One server to a port. Something already answering that this app does not track would only meet a
+        // second basalt fighting for the same address — the new one fails to bind, or both answer and the
+        // port's words become a coin toss. The banner up top offers to watch the one that is there.
+        if (!process.IsAlive)
+        {
+            var port = cfg?.Port ?? 8080;
+            if (NativeMethods.ListenersOnPort((ushort)port).Length > 0)
+            {
+                Notice?.Invoke($"port {port} is already serving — Basalt UI did not start that server, and a second " +
+                               "basalt on the same port would only fight it. The banner up top offers to watch it.");
+                return false;
+            }
+        }
+
         spec = new LaunchSpec
         {
             ExePath = Settings.BasaltExePath,
@@ -951,10 +965,21 @@ public sealed class MainViewModel : ObservableObject
         OnUi(RefreshCommands);
     }
 
-    public async Task RestartAsync()
+    /// <summary>Stop and start again. A stop that did not land means no restart: starting into a port that
+    /// is still held only adds a second server to fight the first. True when a start was attempted.</summary>
+    public async Task<bool> RestartAsync()
     {
-        await StopAsync();
-        await StartAsync();
+        if (process.IsAlive)
+        {
+            await StopAsync();
+            if (process.IsAlive)
+            {
+                Append("app: the server did not stop — the restart is off; its own console keeps control",
+                       LogSource.Error);
+                return false;
+            }
+        }
+        return await StartAsync();
     }
 
     /// <summary>Load or unload the model in place, without touching the process.</summary>
@@ -1131,6 +1156,8 @@ public sealed class MainViewModel : ObservableObject
             Append($"app: the engine only serves models its config listed at start — restarting with {file} aboard",
                    LogSource.App);
             await RestartAsync();
+            if (!process.IsAlive)
+                return;                                 // the restart did not happen: the log says what stopped it
         }
         else
         {
