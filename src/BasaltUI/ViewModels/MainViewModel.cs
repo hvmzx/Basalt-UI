@@ -1215,9 +1215,23 @@ public sealed class MainViewModel : ObservableObject
             known.Add(m.Id);
             known.Add(Stem(m.Id));
         }
+
+        // A config entry that points at a folder file is the engine's row in disguise: the pack carries
+        // its own name, so the stems can differ ("…FN-…" serves as "…Flash-Next …"). With the server up
+        // its list is the authority — the file would only be the same model twice. Stopped, the folder
+        // list stays whole: those rows are what a double-click starts basalt with.
+        var configured = status.Reachable
+            ? getConfig()?.ModelEntries()
+                .Select(e => Path.GetFileName(ConfigDocument.Text(e, "model")?.Trim() ?? ""))
+                .Where(n => n.Length > 0)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : null;
+
         foreach (var f in localModels)
         {
             if (known.Contains(f.Name) || known.Contains(Stem(f.Name)))
+                continue;
+            if (configured?.Contains(f.Name) == true)
                 continue;
             rows.Add(new HomeModelRow(f.Name, f.Detail + " · in the models folder", Live: false));
         }

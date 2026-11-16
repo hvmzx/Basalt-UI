@@ -156,34 +156,6 @@
                 <StackPanel Margin="0,0,2,16">
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <DockPanel LastChildFill="False">
-                                <TextBlock DockPanel.Dock="Left" Text="Throughput" Style="{StaticResource CardTitle}" />
-                                <TextBlock DockPanel.Dock="Right" Text="{Binding LiveText}" Style="{StaticResource Label}" />
-                            </DockPanel>
-                            <Grid Margin="0,14,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="18" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <c:Sparkline Grid.Column="0" Height="104" Caption="decode"
-                                             Values="{Binding DecodeSeries}"
-                                             ValueText="{Binding DecodeValue}"
-                                             Stroke="{DynamicResource Accent}" />
-                                <c:Sparkline Grid.Column="2" Height="104" Caption="prefill"
-                                             Values="{Binding PrefillSeries}" ValueText="{Binding PrefillValue}"
-                                             Stroke="{DynamicResource Slate}" />
-                            </Grid>
-                            <DockPanel Margin="0,12,0,0" LastChildFill="False">
-                                <TextBlock DockPanel.Dock="Left" Text="{Binding QueueText}" Style="{StaticResource Chip}" />
-                                <TextBlock DockPanel.Dock="Right" Text="{Binding EngineLine}" Style="{StaticResource Label}"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                            </DockPanel>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
-                        <StackPanel>
                             <StackPanel>
                                 <TextBlock Text="{Binding GpuNameText}" Style="{StaticResource CardTitle}"
                                            TextTrimming="CharacterEllipsis" />
@@ -245,6 +217,34 @@
                                     </WrapPanel>
                                 </StackPanel>
                             </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="Throughput" Style="{StaticResource CardTitle}" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding LiveText}" Style="{StaticResource Label}" />
+                            </DockPanel>
+                            <Grid Margin="0,14,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <c:Sparkline Grid.Column="0" Height="104" Caption="decode"
+                                             Values="{Binding DecodeSeries}"
+                                             ValueText="{Binding DecodeValue}"
+                                             Stroke="{DynamicResource Accent}" />
+                                <c:Sparkline Grid.Column="2" Height="104" Caption="prefill"
+                                             Values="{Binding PrefillSeries}" ValueText="{Binding PrefillValue}"
+                                             Stroke="{DynamicResource Slate}" />
+                            </Grid>
+                            <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding QueueText}" Style="{StaticResource Chip}" />
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding EngineLine}" Style="{StaticResource Label}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
                         </StackPanel>
                     </Border>
 
