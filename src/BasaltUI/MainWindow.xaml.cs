@@ -226,7 +226,7 @@ public partial class MainWindow : Window
             return;
         if (!row.Live)
         {
-            Vm.OpenLocalModel(row.Id);       // a folder file the engine does not serve: say what it needs
+            _ = Vm.OpenLocalModel(row.Id);   // a folder file: switch it in, or start basalt when the config already points at it
             return;
         }
         if (!Vm.IsConnected)

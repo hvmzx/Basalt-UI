@@ -1078,21 +1078,58 @@ public sealed class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// A file clicked in the Models card that the engine does not serve: the file is in the folder, but a
-    /// model entry in the config still has to point at it before the engine can load it. If the server is
-    /// answering, the switch is tried anyway — the engine's answer lands in the log either way.
+    /// A file clicked in the Models card that the engine does not serve. With the server answering, the
+    /// switch is tried anyway — the engine's answer lands in the log either way. While stopped, the config
+    /// gets the say: a model entry that already points at the file means starting basalt loads it, so that
+    /// is what the click does; no entry yet is the only case the click cannot answer itself.
     /// </summary>
-    public void OpenLocalModel(string file)
+    public async Task OpenLocalModel(string file)
     {
         if (status.Reachable)
         {
-            _ = SwitchModelAsync(file);
+            await SwitchModelAsync(file);
             return;
         }
-        Append($"model: {file} is in the models folder — Settings → Models can point a model at the file, " +
-               "and basalt has to be running to load it", LogSource.App);
-        Notice?.Invoke($"{file} needs a model entry — open Settings → Models");
-        SettingsOpened?.Invoke();
+
+        var configured = getConfig()?.ModelEntries()
+            .Any(e => SameModelFile(ConfigDocument.Text(e, "model"), file)) == true;
+        if (!configured)
+        {
+            Append($"model: {file} is in the models folder — Settings → Models can point a model at the file, " +
+                   "and basalt has to be running to load it", LogSource.App);
+            Notice?.Invoke($"{file} needs a model entry — open Settings → Models");
+            SettingsOpened?.Invoke();
+            return;
+        }
+
+        Append($"app: starting basalt — {file} is in the config, it loads as the server comes up", LogSource.App);
+        if (!await StartAsync())
+            return;                                             // the start checks already said what stopped it
+
+        // The engine loads its config's models on its own; wait a little for it to answer before judging
+        // whether anything more is needed. Answering with nothing loading or loaded is the one case where
+        // the switch is still worth trying — its answer lands in the log either way.
+        for (var waited = 0; waited < 20 && !status.Reachable; waited++)
+            await Task.Delay(1000);
+        if (!status.Reachable)
+        {
+            Append("app: the server has not answered yet — it may still be loading; the log keeps the word",
+                   LogSource.App);
+            return;
+        }
+        if (!status.Loaded && !status.Loading)
+            await SwitchModelAsync(file);
+    }
+
+    /// <summary>Does a config model entry's path point at this file? The entry may carry a full path or a name,
+    /// and Windows does not care about case in either.</summary>
+    private static bool SameModelFile(string? entryPath, string file)
+    {
+        var trimmed = entryPath?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+            return false;
+        return trimmed.Equals(file, StringComparison.OrdinalIgnoreCase) ||
+               Path.GetFileName(trimmed).Equals(file, StringComparison.OrdinalIgnoreCase);
     }
 
     // ---- plumbing ---------------------------------------------------------------------------------------
@@ -1164,8 +1201,8 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>
     /// What the card shows is one honest list: the models a running server serves, then the files
-    /// sitting in the models folder that the server is not serving (they still need a config entry
-    /// before the engine can load them, which is what a click on one of them says).
+    /// sitting in the models folder that the server is not serving (a click on one of those switches
+    /// to it, or starts basalt for it when the config already points at the file).
     /// </summary>
     private void RebuildDisplay()
     {
