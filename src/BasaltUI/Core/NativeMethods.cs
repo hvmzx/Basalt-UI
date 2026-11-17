@@ -91,7 +91,8 @@ internal static class NativeMethods
     /// process holds its own console, so attaching to the launcher alone — the id we started — misses it.
     /// Returns false when no process in the tree has a console we can attach to.
     /// </summary>
-    public static bool SendCtrlC(int targetPid, IEnumerable<int>? alsoTry = null, Action<string>? trace = null)
+    public static bool SendCtrlC(int targetPid, IEnumerable<int>? alsoTry = null, Action<string>? trace = null,
+                                 bool breakInstead = false)
     {
         var tree = new List<int>();
         if (targetPid > 0)
@@ -99,6 +100,11 @@ internal static class NativeMethods
         tree.AddRange((alsoTry ?? []).Where(p => p > 0 && !tree.Contains(p)));
         if (tree.Count == 0)
             return false;
+
+        // Ctrl+Break, unlike Ctrl+C, cannot be masked by a process-group root — and basalt's server runs
+        // as one, so a plain Ctrl+C never reaches it. Python turns the break into the same KeyboardInterrupt.
+        var kind = breakInstead ? CTRL_BREAK_EVENT : CTRL_C_EVENT;
+        var label = breakInstead ? "ctrl+Break" : "ctrl+C";
 
         swallow ??= _ => true;
         FreeConsole();                                  // a GUI app normally has none; make sure we start detached
@@ -124,9 +130,9 @@ internal static class NativeMethods
             try
             {
                 SetConsoleCtrlHandler(swallow, true);   // a broadcast would otherwise stop us too
-                if (GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0))
+                if (GenerateConsoleCtrlEvent(kind, 0))
                 {
-                    trace?.Invoke($"ctrl+C to the console of pid {attachTo}, holding [{string.Join(", ", pids)}]");
+                    trace?.Invoke($"{label} to the console of pid {attachTo}, holding [{string.Join(", ", pids)}]");
                     return true;
                 }
                 trace?.Invoke($"console of pid {attachTo} refused the event: {Marshal.GetLastWin32Error()}");
@@ -140,8 +146,8 @@ internal static class NativeMethods
         }
 
         trace?.Invoke(consoles.Count == 0 && LastConsoleError != 0
-            ? $"no console among [{string.Join(", ", tree)}] would take a Ctrl+C (attach refused, win32 {LastConsoleError})"
-            : $"no console among [{string.Join(", ", tree)}] would take a Ctrl+C");
+            ? $"no console among [{string.Join(", ", tree)}] would take a {label} (attach refused, win32 {LastConsoleError})"
+            : $"no console among [{string.Join(", ", tree)}] would take a {label}");
         return false;
     }
 

@@ -221,8 +221,7 @@ public sealed class BasaltProcess : IDisposable
         }
 
         AppPaths.Log($"stop: our pid {pid}, port {ServePort}, the rest of the server [{string.Join(", ", kids)}]");
-        var sent = NativeMethods.SendCtrlC(pid, kids, AppPaths.Log);
-        if (!sent)
+        var sent = NativeMethods.SendCtrlC(pid, kids, AppPaths.Log);        if (!sent)
             Notice?.Invoke(owned
                 ? "no console to send Ctrl+C to — terminating the process instead"
                 : "that server runs in another session; its console is not reachable");
@@ -230,19 +229,30 @@ public sealed class BasaltProcess : IDisposable
         var seconds = force ? 2 : Math.Max(2, graceSeconds);
         var deadline = DateTime.UtcNow.AddSeconds(seconds);
         var retryAt = sent ? DateTime.UtcNow.AddSeconds(seconds * 0.35) : DateTime.MaxValue;
+        var finalAt = sent ? DateTime.UtcNow.AddSeconds(seconds * 0.75) : DateTime.MaxValue;
         var resent = false;
+        var finished = false;
         while (DateTime.UtcNow < deadline)
         {
             if (!IsAlive)
                 return FinishStopped(sent ? "stopped" : "terminated");
 
-            // basalt's own protocol: a first Ctrl+C stops the server politely, a second one ends a stubborn
-            // engine at once. One retry well before the grace runs out keeps a slow model load recoverable.
+            // basalt's own protocol: the first signal stops the server politely, the next one ends a
+            // stubborn engine at once. The server is a process-group root, though — a plain Ctrl+C can
+            // be masked for it entirely — so the later signals go as Ctrl+Break, which Windows will not
+            // let a group root refuse, and which Python turns into the same KeyboardInterrupt.
             if (!resent && DateTime.UtcNow >= retryAt)
             {
-                resent = NativeMethods.SendCtrlC(pid, NativeMethods.ServerTree(pid, ServePort).Where(p => p != pid), AppPaths.Log);
+                resent = NativeMethods.SendCtrlC(pid, NativeMethods.ServerTree(pid, ServePort).Where(p => p != pid),
+                                                 AppPaths.Log, breakInstead: true);
                 if (resent)
-                    Notice?.Invoke("still running — Ctrl+C again, which tells basalt to force it");
+                    Notice?.Invoke("still running — Ctrl+Break, which the server hears over its mask");
+            }
+            else if (resent && !finished && DateTime.UtcNow >= finalAt)
+            {
+                finished = true;
+                NativeMethods.SendCtrlC(pid, NativeMethods.ServerTree(pid, ServePort).Where(p => p != pid),
+                                        AppPaths.Log, breakInstead: true);
             }
             await Task.Delay(150);
         }

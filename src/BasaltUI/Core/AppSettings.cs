@@ -148,7 +148,7 @@ public sealed class AppSettings
     public bool RunAtLogon { get; set; }
     public bool MinimiseToTrayOnClose { get; set; } = true;
     public bool StopServerOnAppExit { get; set; } = true;
-    public int StopGraceSeconds { get; set; } = 60;
+    public int StopGraceSeconds { get; set; } = 120;
     public int PollMs { get; set; } = 1000;
     public bool OpenWebUiOnReady { get; set; }
 
