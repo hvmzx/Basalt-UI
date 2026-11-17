@@ -220,6 +220,42 @@ public partial class App : Application
                 AppPaths.Log("port scan: " + ex.Message);
             }
             Vm.SetForeign(pids);
+            if (pids.Length > 0)
+                await AskAboutForeignAsync(pids, Config?.Port ?? 8080);
+        }
+    }
+
+    /// <summary>One question at startup about a server that was already answering: basalt can be adopted
+    /// into the session by its port's config, or stopped — both only with the user's say-so.</summary>
+    private async Task AskAboutForeignAsync(int[] pids, int port)
+    {
+        var info = Vm.DescribeForeign(pids[0], port);
+        if (info.ConfigName is { } config)
+        {
+            var answer = Shell.Dialog.ConfirmThree(window,
+                "A basalt is already running",
+                $"A basalt server (pid {info.Pid}, {info.ProcessName}) is answering on port {port}.\n\n" +
+                $"Its port matches the config \"{config}\". Attach it to Basalt UI so this window controls it " +
+                "as if it had been started here?",
+                "Attach it", "Stop it", "Leave it");
+            if (answer == true)
+                Vm.AdoptForeign(info.Pid, config, port);
+            else if (answer == false)
+                await Vm.StopForeignAsync(info.Pid, port);
+            else
+                Vm.IgnoreForeign();
+        }
+        else
+        {
+            var stop = Shell.Dialog.Confirm(window, "A server is answering",
+                $"Something already answers on port {port} (pid {info.Pid}" +
+                (info.ProcessName.Length > 0 ? $", {info.ProcessName}" : "") +
+                "). Basalt UI did not start it, and no config here claims that port.\n\nStop it?",
+                "Stop it", "Leave it");
+            if (stop)
+                await Vm.StopForeignAsync(info.Pid, port);
+            else
+                Vm.IgnoreForeign();
         }
     }
 

@@ -361,13 +361,46 @@ public sealed class MainViewModel : ObservableObject
         get
         {
             var bits = new List<string>();
-            if (!string.IsNullOrWhiteSpace(status.CpuName))
-                bits.Add(status.CpuName.Trim());
+            var cpu = FriendlyCpuName();
+            if (cpu.Length > 0)
+                bits.Add(cpu);
             if (status.Cores > 0)
                 bits.Add(status.Cores + " cores / " + status.Threads + " threads");
             bits.Add(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString());
             return string.Join(" · ", bits);
         }
+    }
+
+    private static string? friendlyCpu;
+
+    /// <summary>What Windows calls the processor, rather than the engine's raw "Family 26 Model 68 …"
+    /// identifier — that string is a CPUID dump, not a name a person recognises.</summary>
+    private string FriendlyCpuName()
+    {
+        if (friendlyCpu is not null)
+            return friendlyCpu;
+        string? name = null;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+            name = key?.GetValue("ProcessorNameString") as string;
+        }
+        catch
+        {
+            // an unreadable registry is not worth a broken line
+        }
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = status.CpuName;
+            var cut = name.IndexOf(" Family ", StringComparison.OrdinalIgnoreCase);
+            if (cut > 0)
+                name = name[..cut];
+            name = name.Replace(", AuthenticAMD", "", StringComparison.OrdinalIgnoreCase)
+                       .Replace(", GenuineIntel", "", StringComparison.OrdinalIgnoreCase);
+        }
+        friendlyCpu = name.Trim();
+        return friendlyCpu;
     }
     public string UptimeText
     {
@@ -1426,6 +1459,65 @@ public sealed class MainViewModel : ObservableObject
     public event Action? TakeOverRequested;
 
     public void SetForeign(int[] pids) => OnUi(() => ForeignPids = pids ?? []);
+
+    /// <summary>What a stray server looks like: its process name and, when it is basalt, the config whose
+    /// port it is serving. The port is enough to tell which config it belongs to without a command line.</summary>
+    public sealed record ForeignServer(int Pid, string ProcessName, string? ConfigName, int Port);
+
+    public ForeignServer DescribeForeign(int pid, int port)
+    {
+        string name = "";
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            name = process.ProcessName;
+        }
+        catch
+        {
+            // a process that exited between the port scan and here is nothing to ask about
+        }
+        var names = Profiles.Names.OrderByDescending(n => n == Profiles.Active).ToList();
+        var config = name.Contains("basalt", StringComparison.OrdinalIgnoreCase)
+            ? names.FirstOrDefault(n =>
+              {
+                  var server = Profiles.Document(n)?["server"] as JsonObject;
+                  return server is not null &&
+                         (ConfigDocument.Int(server, "port") ?? 8080) == port;
+              })
+            : null;
+        return new ForeignServer(pid, name, config, port);
+    }
+
+    /// <summary>Take control of a basalt that was started elsewhere: it is now this app's server, wearing
+    /// the config its port identified, with no file rewrite and no restart.</summary>
+    public void AdoptForeign(int pid, string configName, int port)
+    {
+        process.Adopt(pid, $"adopted basalt on port {port}");
+        process.ServePort = port;
+        Profiles.Active = configName;
+        var file = Profiles.FilePath(configName);
+        if (!string.IsNullOrWhiteSpace(file))
+        {
+            Settings.ConfigPath = file;
+            Settings.Save();
+        }
+        reopenConfig();
+        ReapplyPolling();
+        SetRunning(configName, true);
+        SetForeign([]);
+        Append($"app: adopted pid {pid} as config \"{configName}\" — it is controlled from here now", LogSource.App);
+    }
+
+    /// <summary>The user chose to stop a stray server; a directed stop may force it after a polite Ctrl+C.</summary>
+    public async Task StopForeignAsync(int pid, int port)
+    {
+        var helper = new BasaltProcess();
+        helper.Adopt(pid, $"foreign server on port {port}");
+        helper.ServePort = port;
+        await helper.StopAsync(Settings.StopGraceSeconds, userDirected: true);
+        SetForeign([]);
+        Append($"app: stopped the server on port {port} (pid {pid})", LogSource.App);
+    }
 
     /// <summary>Watch the other server here too: display and HTTP control, never a kill.</summary>
     public void TakeOverForeign() => TakeOverRequested?.Invoke();

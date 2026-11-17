@@ -115,19 +115,6 @@
 
         <!-- ============ a server we did not start, and a basalt that is behind ============ -->
         <StackPanel Grid.Row="0" Margin="20,0,20,0">
-            <Border Margin="0,4,0,0" Style="{StaticResource Banner}" Background="{DynamicResource WaitBg}"
-                    Visibility="{Binding HasForeign, Converter={x:Static cv:BoolToVisibility.Instance}}">
-                <DockPanel LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Button x:Name="TakeOverButton" Content="Watch it here" Style="{StaticResource GhostButton}"
-                                Click="TakeOver_Click" Margin="0,0,8,0" />
-                        <Button x:Name="IgnoreButton" Content="Ignore" Style="{StaticResource GhostButton}"
-                                Click="IgnoreForeign_Click" />
-                    </StackPanel>
-                    <TextBlock Text="{Binding ForeignHint}" TextWrapping="Wrap" VerticalAlignment="Center"
-                               Margin="0,0,12,0" />
-                </DockPanel>
-            </Border>
 
             <Border Margin="0,12,0,0" Style="{StaticResource Banner}" Background="{DynamicResource AccentSoft}"
                     Visibility="{Binding UpdateAvailable, Converter={x:Static cv:BoolToVisibility.Instance}}">
