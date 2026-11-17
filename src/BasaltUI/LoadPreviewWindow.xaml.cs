@@ -61,18 +61,23 @@ public partial class LoadPreviewWindow : Window
     {
         var bytes = BasaltLocator.HumanBytes;
         var hardware = plans.FirstOrDefault(p => p.Hardware is not null)?.Hardware;
-        // What is actually free now, not the card's total: a tier cannot use more than exists, and
-        // whatever does not fit goes to the SSD rather than pretending RAM or VRAM grew.
-        var vramRoom = hardware?.VramFree ?? 0;
-        var ramRoom = hardware?.RamFree ?? 0;
+        var reserve = models.FirstOrDefault() ?? new LoadPreview.Options("", 0, null, 0, 1, null, false, 0, null);
+        // What is actually free after the reserves, shared across the models in this config: the first
+        // model takes what it needs, the next gets what is left, and anything over goes to the SSD.
+        var vramRoom = Math.Max(0, (hardware?.VramFree ?? 0) - reserve.VramReserveMib * 1024 * 1024);
+        var ramRoom = Math.Max(0, (hardware?.RamFree ?? 0) - reserve.RamReserveMib * 1024 * 1024);
+        var vramLeft = vramRoom;
+        var ramLeft = ramRoom;
 
         var rows = new List<TierRow>();
         long vram = 0, ram = 0, ssd = 0, files = 0;
         for (var i = 0; i < plans.Count; i++)
         {
             var tier = plans[i].Tiers ?? new LoadPreview.Tiers(0, 0, 0, 0);
-            var v = System.Math.Min(tier.Vram, vramRoom);
-            var r = System.Math.Min(tier.Ram, ramRoom);
+            var v = System.Math.Min(tier.Vram, vramLeft);
+            var r = System.Math.Min(tier.Ram, ramLeft);
+            vramLeft -= v;
+            ramLeft -= r;
             var s = tier.Ssd + (tier.Vram - v) + (tier.Ram - r);
             vram += v;
             ram += r;

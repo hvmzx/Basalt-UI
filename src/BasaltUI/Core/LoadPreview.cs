@@ -142,11 +142,19 @@ public static class LoadPreview
         var ramBudget = o.ResidentExperts ? Math.Max(0, hw.RamFree - o.RamReserveMib * Mib - kvInRam) : 0;
         var expertsInRam = Math.Min(rest, ramBudget);
         if (expertsInRam < rest)
-        {
-            ramBudget = Math.Max(0, ramBudget - FileCacheFloorBytes);
-            expertsInRam = Math.Min(rest, ramBudget);
-        }
+            expertsInRam = Math.Min(rest, Math.Max(0, ramBudget - FileCacheFloorBytes));
         var fromDisk = rest - expertsInRam;
+
+        // Even with resident-experts off the OS fills spare RAM with pages of the file it is reading:
+        // that memory is really in use by the model, so show it as RAM and take it off the SSD figure.
+        var cacheRam = 0L;
+        if (!o.ResidentExperts && fromDisk > 0)
+        {
+            var spare = Math.Max(0, hw.RamFree - o.RamReserveMib * Mib - kvInRam);
+            cacheRam = Math.Min(fromDisk, Math.Max(FileCacheFloorBytes, spare / 2));
+        }
+        var tiersRam = kvInRam + expertsInRam + cacheRam;
+        var tiersSsd = Math.Max(0, fromDisk - cacheRam);
 
         var bytes = BasaltLocator.HumanBytes;
         var rows = new List<(string, string)>
@@ -187,16 +195,18 @@ public static class LoadPreview
         rows.Add(("VRAM it would take", hw.VramKnown
             ? $"≈{bytes(fixedVram + expertsInVram)} of the {bytes(hw.VramFree)} free right now"
             : "GPU not measured"));
-        if (o.ResidentExperts)
-            rows.Add(("RAM it would take", $"≈{bytes(expertsInRam)} of the {bytes(hw.RamFree)} free right now"));
-        rows.Add(("from the SSD", fromDisk > 0 ? $"≈{bytes(fromDisk)} streams on demand" : "nothing"));
+        if (tiersRam > 0)
+            rows.Add(("RAM it would take",
+                      $"≈{bytes(tiersRam)} of the {bytes(hw.RamFree)} free right now" +
+                      (cacheRam > 0 ? $" — {bytes(cacheRam)} of that is the file cache for streamed experts" : "")));
+        rows.Add(("from the SSD", tiersSsd > 0 ? $"≈{bytes(tiersSsd)} streams on demand" : "nothing"));
 
         var verdict = !hw.VramKnown
             ? $"nothing reported the GPU ({hw.VramSource}) — this preview is for the NVIDIA cards basalt runs on"
-            : fromDisk > 0
-                ? $"~{bytes(fromDisk)} of experts would stream from the SSD — replies slow down"
-                : expertsInRam > 0
-                    ? $"fits — ≈{bytes(expertsInVram)} of experts in VRAM, ≈{bytes(expertsInRam)} in RAM"
+            : tiersSsd > 0
+                ? $"~{bytes(tiersSsd)} of experts would stream from the SSD — replies slow down"
+                : expertsInRam > 0 || cacheRam > 0
+                    ? $"fits — ≈{bytes(expertsInVram)} of experts in VRAM, ≈{bytes(tiersRam)} in RAM"
                     : "fits — everything, experts included, in VRAM";
 
         var note = $"memory read the way Task Manager reads it: the card's own memory from DXGI and the counter its GPU page samples for what fills it, Windows' available physical memory for the RAM. " +
@@ -208,7 +218,7 @@ public static class LoadPreview
 
         return new Plan(subject, rows, verdict, note, true,
                         new Tiers(kvInVram + dense + visionTotal + expertsInVram,
-                                  kvInRam + expertsInRam, fromDisk, o.FileBytes), hw);
+                                  tiersRam, tiersSsd, o.FileBytes), hw);
     }
 
     private static bool IsDynamicVision(string? vision, long visionBytes) =>

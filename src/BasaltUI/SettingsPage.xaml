@@ -303,7 +303,7 @@
                                 <TextBlock Text="config file" Style="{StaticResource Label}" VerticalAlignment="Center" />
                                 <TextBox x:Name="ProfileFileBox" Grid.Column="1" Margin="0,0,8,0"
                                          LostFocus="ProfileFile_LostFocus" />
-                                <Button Grid.Column="2" Content="Browseâ€¦" Click="ProfileBrowse_Click" Margin="0,0,8,0" />
+                                <Button Grid.Column="2" Content="Browse…" Click="ProfileBrowse_Click" Margin="0,0,8,0" />
                                 <TextBlock Grid.Column="3" x:Name="ProfileState" Style="{StaticResource Label}"
                                            VerticalAlignment="Center" TextWrapping="Wrap" />
                                 <Button Grid.Column="4" x:Name="ConfigPreviewButton" Content="Preview"
