@@ -14,7 +14,8 @@ namespace BasaltUI.Core;
 /// moment the port first answered until the next moment it does again.
 /// </remarks>
 public sealed record ModelSession(DateTime Since, int Requests, double AvgDecodeTokS, double MaxDecodeTokS,
-                                  double AvgPrefillTokS, double MaxPrefillTokS, bool Current, bool Gap)
+                                  double AvgPrefillTokS, double MaxPrefillTokS, bool Current, bool Gap,
+                                  string Config = "")
 {
     public string DecodeRange => MaxDecodeTokS > 0 || AvgDecodeTokS > 0
         ? $"{AvgDecodeTokS:0.#} · {MaxDecodeTokS:0.#} tok/s"
@@ -52,6 +53,7 @@ public sealed class ThroughputRecorder
         public double PrefillMs;
         public double MaxDecode;
         public double MaxPrefill;
+        public string Context = "";                 // the config the watched server was serving
     }
 
     private sealed class ModelBook
@@ -66,12 +68,21 @@ public sealed class ThroughputRecorder
     private readonly Dictionary<string, bool> seenRequests = new(StringComparer.Ordinal);
     private long episodeKey;                                   // a counter-less engine's session, in the app's own clock
     private long gappedForKey;                                 // the session this run already wrote a gap row for
+    private string context = "";                               // the config the watched server is serving
     private bool reachableLastBeat;
     private bool dirty;
     private DateTime lastSaveAttempt;
     private readonly object gate = new();
 
     public ThroughputRecorder() => Load();
+
+    /// <summary>Which config the watched server is serving from now on. Every session opened after this
+    /// call wears the name, which is how a model held by two configs keeps two histories apart.</summary>
+    public void SetContext(string configName)
+    {
+        lock (gate)
+            context = configName ?? "";
+    }
 
     /// <summary>
     /// One status beat, on the thread the screen already runs on: requests counted, sessions opened and
@@ -148,7 +159,7 @@ public sealed class ThroughputRecorder
             return false;
 
         var book = BookFor(model);
-        var acc = book.Open ??= new Acc { Key = key, Since = SessionStartOf(key) };
+        var acc = book.Open ??= new Acc { Key = key, Since = SessionStartOf(key), Context = context };
 
         acc.Requests++;
         acc.Written += r.OutputTokens;
@@ -201,7 +212,8 @@ public sealed class ThroughputRecorder
             missedPrefillNew > 0 && missedPromptMs > 0 ? missedPrefillNew / (missedPromptMs / 1000.0) : 0,
             s.Best?.PrefillTokS ?? 0,
             Current: false,
-            Gap: true));
+            Gap: true,
+            Config: context));
         TrimClosed(book);
         gappedForKey = key;
         return true;
@@ -268,7 +280,8 @@ public sealed class ThroughputRecorder
         acc.PrefillMs > 0 ? acc.PrefillNew / (acc.PrefillMs / 1000.0) : 0,
         acc.MaxPrefill,
         Current: false,
-        Gap: false);
+        Gap: false,
+        Config: acc.Context);
 
     private static void TrimClosed(ModelBook book)
     {
@@ -333,7 +346,8 @@ public sealed class ThroughputRecorder
         acc.PrefillMs > 0 ? acc.PrefillNew / (acc.PrefillMs / 1000.0) : 0,
         acc.MaxPrefill,
         current,
-        false);
+        false,
+        acc.Context);
 
     /// <summary>
     /// The app is going away: whatever session is open is now history, and the file is written before the
@@ -379,6 +393,7 @@ public sealed class ThroughputRecorder
                             PrefillMs = e.Get("prefill_ms").D(),
                             MaxDecode = e.Get("max_decode").D(),
                             MaxPrefill = e.Get("max_prefill").D(),
+                            Context = e.Get("config").S(),
                         };
                     }
                     else
@@ -391,7 +406,8 @@ public sealed class ThroughputRecorder
                             e.Get("avg_prefill").D(),
                             e.Get("max_prefill").D(),
                             Current: false,
-                            Gap: e.Get("gap").B()));
+                            Gap: e.Get("gap").B(),
+                            Config: e.Get("config").S()));
                     }
                 }
             }
@@ -451,6 +467,7 @@ public sealed class ThroughputRecorder
         ["max_prefill"] = s.MaxPrefillTokS,
         ["open"] = open,
         ["gap"] = s.Gap,
+        ["config"] = s.Config,
     };
 
     /// <summary>

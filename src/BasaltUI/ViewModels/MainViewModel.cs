@@ -1504,6 +1504,7 @@ public sealed class MainViewModel : ObservableObject
         process.Adopt(pid, $"adopted basalt on port {port}");
         process.ServePort = port;
         Profiles.Active = configName;
+        Throughput.SetContext(configName);
         var file = Profiles.FilePath(configName);
         if (!string.IsNullOrWhiteSpace(file))
         {
@@ -2059,6 +2060,8 @@ public sealed class MainViewModel : ObservableObject
         }
 
         Profiles.Active = name;
+        // the watched server serves this config from now on; its sessions belong to it
+        Throughput.SetContext(name);
         if (!string.Equals(Settings.ConfigPath, target, StringComparison.OrdinalIgnoreCase))
         {
             Settings.ConfigPath = target;           // the app now points at the config that was applied
@@ -2162,7 +2165,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (key.Length == 0)
             return "";
-        var list = Throughput.Sessions(key);
+        var list = ScopedHistory(key, Profiles.Active ?? "");
         var live = list.FirstOrDefault(s => s.Current && s.AvgDecodeTokS > 0);
         if (live is not null)
             return $"avg {live.AvgDecodeTokS:0.#} tok/s";
@@ -2181,7 +2184,7 @@ public sealed class MainViewModel : ObservableObject
         var candidates = new List<string> { row.Key, row.Id, row.Id + ".basalt", row.Id + ".gguf" };
         foreach (var key in candidates)
             if (key.Length > 0 && Throughput.HasAnything(key))
-                return Throughput.Sessions(key);
+                return ScopedHistory(key, row.ConfigName);
 
         // Requests are recorded under the pack name inside the .basalt file — a name that shares nothing
         // with the file's. The card ties file to pack name through the config: the server's model list is
@@ -2203,7 +2206,7 @@ public sealed class MainViewModel : ObservableObject
             face ??= served.FirstOrDefault(m => SameModelFile(m.Id, row.Key) ||
                                                Stem(m.Id).Equals(Stem(row.Key), StringComparison.OrdinalIgnoreCase))?.Id;
             if (face is { Length: > 0 } && Throughput.HasAnything(face))
-                return Throughput.Sessions(face);
+                return ScopedHistory(face, row.ConfigName);
             // the pairing the card learned while the server answered
             lock (learnedFaces)
             {
@@ -2214,10 +2217,21 @@ public sealed class MainViewModel : ObservableObject
                     face = seen;
             }
             if (face is { Length: > 0 } && Throughput.HasAnything(face))
-                return Throughput.Sessions(face);
+                return ScopedHistory(face, row.ConfigName);
         }
 
         return Array.Empty<ModelSession>();
+    }
+
+    /// <summary>Only the sessions this config served. Sessions recorded before the stamp existed carry no
+    /// config name, and show themselves rather than be lost — until stamped history exists to take over.</summary>
+    private IReadOnlyList<ModelSession> ScopedHistory(string key, string configName)
+    {
+        var all = Throughput.Sessions(key);
+        var stamped = all.Where(s => s.Config.Equals(configName, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (stamped.Count > 0)
+            return stamped;
+        return all.Where(s => s.Config.Length == 0).ToList();
     }
 
     /// <summary>
