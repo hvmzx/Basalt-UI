@@ -988,7 +988,9 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!Settings.StartConfigsOnLaunch)
             return;
-        foreach (var name in Profiles.Names.Where(Profiles.StartsOnLaunch).ToList())
+        var watched = Profiles.Active;
+        var flagged = Profiles.Names.Where(Profiles.StartsOnLaunch).ToList();
+        foreach (var name in flagged)
         {
             var error = ApplyProfile(name, null);
             if (error is not null)
@@ -996,7 +998,7 @@ public sealed class MainViewModel : ObservableObject
                 Append($"app: config \"{name}\" did not start — {error}", LogSource.Error);
                 continue;
             }
-            if (name == Profiles.Active)
+            if (name == watched)
             {
                 if (!process.IsAlive)
                     await StartAsync();
@@ -1024,6 +1026,14 @@ public sealed class MainViewModel : ObservableObject
             }
             else
                 Append($"app: config \"{name}\" could not start", LogSource.Error);
+        }
+
+        // Applying each config pointed the app at the last one; the window watches the one that was
+        // active when it opened, so put its file back at the end. Its process is already running.
+        if (watched is not null && flagged.Contains(watched))
+        {
+            ApplyProfile(watched, null);
+            ReapplyPolling();
         }
     }
 
