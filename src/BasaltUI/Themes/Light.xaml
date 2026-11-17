@@ -30,6 +30,7 @@
     <SolidColorBrush x:Key="Warn" Color="#8F6400" />
     <SolidColorBrush x:Key="Bad" Color="#C0392F" />
     <SolidColorBrush x:Key="Good" Color="#157A44" />
+    <SolidColorBrush x:Key="RunBg" Color="#E4F3EA" />
 
     <SolidColorBrush x:Key="ReadyBg" Color="#E4F4EA" />
     <SolidColorBrush x:Key="BusyBg" Color="#E7F0FC" />

@@ -97,7 +97,8 @@ public sealed class MainViewModel : ObservableObject
         MaybeRescanLocalModels(force: true);   // the Models card has something to show before the first beat
 
         StartCommand = new RelayCommand(async () => await StartAsync(), () => !process.IsAlive, "Start");
-        StopCommand = new RelayCommand(async () => await StopAsync(), () => process.IsAlive, "Stop");
+        StopCommand = new RelayCommand(async () => await StopAsync(),
+                                       () => process.IsAlive || otherServers.Any(s => s.Value.IsAlive), "Stop");
         RestartCommand = new RelayCommand(async () => await RestartAsync(), () => process.IsAlive, "Restart");
         LoadCommand = new RelayCommand(async () => await ControlAsync("/load", null, "load"), () => status.Reachable && !status.Loaded, "Load");
         UnloadCommand = new RelayCommand(async () => await ControlAsync("/unload", null, "unload"), () => status.Reachable && status.Loaded, "Unload");
@@ -1204,6 +1205,11 @@ public sealed class MainViewModel : ObservableObject
             var extra = new BasaltProcess();
             extra.ConsoleLine += line => Append($"[{name}] {line}", LogSource.Server);
             extra.Notice += note => Append($"[{name}] {note}", LogSource.App);
+            extra.StateChanged += (state, _) => OnUi(() =>
+            {
+                if (state is RunState.Stopped or RunState.Failed)
+                    SetRunning(name, false);
+            });
             if (extra.Start(spec))
             {
                 otherServers[name] = extra;
@@ -1243,13 +1249,16 @@ public sealed class MainViewModel : ObservableObject
         {
             if (extra.IsAlive)
             {
-                Append($"app: stopping config \"{name}\"", LogSource.App);
+                Append($"app: stopping config \"{name}\" (Ctrl+C to the server)", LogSource.App);
                 await extra.StopAsync(Settings.StopGraceSeconds);
             }
             otherServers.Remove(name);
         }
         if (process.IsAlive)
+        {
+            Append("app: stopping (Ctrl+C to the server)", LogSource.App);
             await process.StopAsync(Settings.StopGraceSeconds);
+        }
     }
 
     /// <summary>Checks the paths and api-key rules, and hands back the launch spec. Shows what is wrong.</summary>
@@ -1312,13 +1321,13 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task StopAsync()
     {
-        if (!process.IsAlive)
+        if (!process.IsAlive && !otherServers.Any(s => s.Value.IsAlive))
             return;
-        Append("app: stopping (Ctrl+C to the server)", LogSource.App);
-        await process.StopAsync(Settings.StopGraceSeconds);
-        if (!process.IsAlive)
-            foreach (var name in runningProfiles.ToList())
-                SetRunning(name, false);
+        // the stop at the top is the stop for everything: the watched server and every other
+        // config this app started each get the same clean Ctrl+C, the user asked for all of them
+        await StopAllConfigsAsync();
+        foreach (var name in runningProfiles.ToList())
+            SetRunning(name, false);
         OnUi(RefreshCommands);
     }
 
@@ -2174,19 +2183,41 @@ public sealed class MainViewModel : ObservableObject
             if (key.Length > 0 && Throughput.HasAnything(key))
                 return Throughput.Sessions(key);
 
-        // A stem alone is not enough — two configs can hold the same model — so only accept a recorded
-        // key whose file this very config actually defines.
-        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Requests are recorded under the pack name inside the .basalt file — a name that shares nothing
+        // with the file's. The card ties file to pack name through the config: the server's model list is
+        // in the config's order, so while the counts agree the i-th entry is the i-th served model, and
+        // that tie decides which recorded key belongs to this model of this config.
         var config = Profiles.Document(row.ConfigName);
         if (config is not null)
-            foreach (var node in (config["models"] as JsonArray ?? []).OfType<JsonObject>())
-                if (Path.GetFileName(ConfigDocument.Text(node, "model") ?? "") is { Length: > 0 } file)
-                    allowed.Add(file);
-        var match = Throughput.ModelNames().FirstOrDefault(k =>
-            allowed.Contains(Path.GetFileName(k)) &&
-            (Path.GetFileNameWithoutExtension(k).Equals(row.Id, StringComparison.OrdinalIgnoreCase) ||
-             Path.GetFileName(k).Equals(row.Id, StringComparison.OrdinalIgnoreCase)));
-        return match is null ? Array.Empty<ModelSession>() : Throughput.Sessions(match);
+        {
+            var entries = (config["models"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+            var served = status.Models;
+            string? face = null;
+            if (status.Reachable && served.Count == entries.Count)
+                for (var i = 0; i < entries.Count; i++)
+                    if (SameModelFile(ConfigDocument.Text(entries[i], "model") ?? "", row.Key))
+                    {
+                        face = served[i].Id;
+                        break;
+                    }
+            face ??= served.FirstOrDefault(m => SameModelFile(m.Id, row.Key) ||
+                                               Stem(m.Id).Equals(Stem(row.Key), StringComparison.OrdinalIgnoreCase))?.Id;
+            if (face is { Length: > 0 } && Throughput.HasAnything(face))
+                return Throughput.Sessions(face);
+            // the pairing the card learned while the server answered
+            lock (learnedFaces)
+            {
+                var file = Path.GetFileName(row.Key);
+                if (learnedFaces.TryGetValue(file, out var seen) ||
+                    learnedFaces.TryGetValue(Stem(file), out seen) ||
+                    learnedFaces.TryGetValue(row.Id, out seen))
+                    face = seen;
+            }
+            if (face is { Length: > 0 } && Throughput.HasAnything(face))
+                return Throughput.Sessions(face);
+        }
+
+        return Array.Empty<ModelSession>();
     }
 
     /// <summary>
@@ -2288,6 +2319,7 @@ public sealed class MainViewModel : ObservableObject
                 loaded = m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase);
                 detail = m.Detail;                          // loaded · 262,144 ctx · vision — the server's words
                 key = m.Id;                                 // the server's name for this row is what the recorder counts
+                RememberFace(f.Name, m.Id);                 // kept for history once the server is gone
             }
             else
             {
@@ -2396,6 +2428,16 @@ public sealed class MainViewModel : ObservableObject
             if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
                 return name[..^ext.Length];
         return name;
+    }
+
+    private static readonly Dictionary<string, string> learnedFaces = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A file→pack-name pairing the card worked out while the server answered. Kept around so a
+    /// model's history stays reachable after the server has been stopped.</summary>
+    private static void RememberFace(string file, string packName)
+    {
+        lock (learnedFaces)
+            learnedFaces[file] = packName;
     }
 
     // ---- the models folder --------------------------------------------------------------------------------------

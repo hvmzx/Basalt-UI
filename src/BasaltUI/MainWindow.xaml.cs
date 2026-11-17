@@ -67,6 +67,7 @@ public partial class MainWindow : Window
             if (logScroller is not null)
                 logScroller.ScrollChanged += (_, _) =>
                     followTail = logScroller.ScrollableHeight - logScroller.VerticalOffset < 24;
+            HookMiddleScroll();
         };
         foreach (var line in Vm.Log)
             logDocument.Blocks.Add(LineFor(line));
@@ -255,6 +256,78 @@ public partial class MainWindow : Window
                 return found;
         }
         return null;
+    }
+
+    // ---- the middle button scrolls the console like a browser: press, move the cursor away from the
+    // press point, and the log drifts at a speed the distance sets; any click or Escape releases it.
+    private System.Windows.Threading.DispatcherTimer? middleTimer;
+    private Point middleAnchor;
+
+    private void HookMiddleScroll()
+    {
+        LogView.PreviewMouseDown += (_, e) =>
+        {
+            if (e.ChangedButton != MouseButton.Middle || logScroller?.ScrollableHeight is not > 0)
+                return;
+            e.Handled = true;
+            StartMiddleScroll(e);
+        };
+    }
+
+    private void StartMiddleScroll(MouseEventArgs e)
+    {
+        middleAnchor = e.GetPosition(LogView);
+        LogView.CaptureMouse();
+        LogView.Cursor = Cursors.ScrollNS;
+        LogView.MouseMove += OnMiddleMove;
+        LogView.MouseUp += OnMiddleEnd;
+        LogView.LostMouseCapture += OnMiddleEnd;
+        KeyDown += OnMiddleKey;
+
+        middleTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        middleTimer.Tick += MiddleTick;
+        middleTimer.Start();
+    }
+
+    private void MiddleTick(object? sender, EventArgs e)
+    {
+        if (logScroller is null)
+            return;
+        var delta = Mouse.GetPosition(LogView).Y - middleAnchor.Y;
+        if (Math.Abs(delta) < 10)
+            return;
+        var speed = Math.Min((Math.Abs(delta) - 10) / 60.0, 6);     // pixels per beat, growing with distance
+        logScroller.ScrollToVerticalOffset(logScroller.VerticalOffset + Math.Sign(delta) * speed);
+    }
+
+    private void OnMiddleMove(object sender, MouseEventArgs e)
+    {
+        // the anchor stays where the press landed; the cursor steers only
+        _ = e;
+    }
+
+    private void OnMiddleEnd(object sender, RoutedEventArgs e) => EndMiddleScroll();
+
+    private void OnMiddleKey(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            EndMiddleScroll();
+            e.Handled = true;
+        }
+    }
+
+    private void EndMiddleScroll()
+    {
+        middleTimer?.Stop();
+        middleTimer = null;
+        LogView.MouseMove -= OnMiddleMove;
+        LogView.MouseUp -= OnMiddleEnd;
+        LogView.LostMouseCapture -= OnMiddleEnd;
+        KeyDown -= OnMiddleKey;
+        LogView.Cursor = Cursors.Arrow;
+        if (LogView.IsMouseCaptured)
+            LogView.ReleaseMouseCapture();
     }
 
     /// <summary>One console line: the faint mono time, then the text in the colour of its source.</summary>

@@ -37,6 +37,7 @@
     <SolidColorBrush x:Key="Warn" Color="#E2B340" />
     <SolidColorBrush x:Key="Bad" Color="#F2685F" />
     <SolidColorBrush x:Key="Good" Color="#43C078" />
+    <SolidColorBrush x:Key="RunBg" Color="#12291C" />
 
     <!-- state capsules: the fill is the state pushed almost to the ground, the word inside carries the colour -->
     <SolidColorBrush x:Key="ReadyBg" Color="#16301F" />

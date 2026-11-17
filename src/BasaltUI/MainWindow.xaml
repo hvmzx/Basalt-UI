@@ -323,7 +323,16 @@
                                 <ItemsControl x:Name="ConfigCardsList" ItemsSource="{Binding ConfigCards}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Style="{StaticResource Card}" Padding="12,10" Margin="0,0,0,10">
+                                            <Border Padding="12,10" Margin="0,0,0,10">
+                                                <Border.Style>
+                                                    <Style TargetType="{x:Type Border}" BasedOn="{StaticResource Card}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Running}" Value="True">
+                                                                <Setter Property="Background" Value="{DynamicResource RunBg}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
                                                 <StackPanel>
                                                     <Grid>
                                                         <Grid.RowDefinitions>
