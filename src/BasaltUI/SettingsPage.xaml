@@ -331,13 +331,13 @@
                             <DockPanel Margin="0,8,0,0" LastChildFill="False">
                                 <CheckBox x:Name="ProfileStartCheck" Content="Start this config when Basalt UI opens"
                                           Checked="ProfileStart_Changed" Unchecked="ProfileStart_Changed" />
+                                <Button DockPanel.Dock="Right" x:Name="ConfigPreviewButton" Content="Preview the whole config…"
+                                        Click="PreviewButton_Click" Margin="0,0,8,0"
+                                        ToolTip="How all the models in this config would sit in VRAM, RAM and on the SSD" />
                                 <TextBlock DockPanel.Dock="Right" x:Name="ProfileCommand" Style="{StaticResource Mono}"
                                            Foreground="{DynamicResource TextFaint}" TextTrimming="CharacterEllipsis"
                                            ToolTip="The command this config is launched with" />
                             </DockPanel>
-                            <TextBlock x:Name="ProfileAttached" Style="{StaticResource Label}"
-                                       Foreground="{DynamicResource TextFaint}" Margin="0,8,0,0"
-                                       TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
                     <!-- ============ the config's own sub-tabs, the same shape as the main ones ============ -->
@@ -397,12 +397,6 @@
                                         <ComboBox x:Name="ConfigAddFieldCombo" DockPanel.Dock="Right" Width="330" Margin="0,0,8,0" />
                                     </DockPanel>
                                 </Border>
-                                <DockPanel Margin="0,0,0,8" LastChildFill="False">
-                                    <TextBlock Text="load preview" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                                    <Button DockPanel.Dock="Right" x:Name="ConfigPreviewButton" Content="Preview…"
-                                            Click="PreviewButton_Click"
-                                            ToolTip="Measure this model against this machine — how it would be split across VRAM and RAM" />
-                                </DockPanel>
                                 <TextBlock DockPanel.Dock="Top" x:Name="ConfigModelHint" Style="{StaticResource Label}"
                                            Margin="0,0,0,8" TextWrapping="Wrap" />
                                 <Border x:Name="ConfigPreviewCard" DockPanel.Dock="Bottom" Style="{StaticResource Card}"

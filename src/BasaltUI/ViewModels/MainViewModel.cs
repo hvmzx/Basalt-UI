@@ -392,19 +392,22 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>What the main page shows: the named configs, each with the models its document defines.</summary>
     public ObservableCollection<ConfigCard> ConfigCards { get; } = [];
 
-    public sealed record ConfigCard(string Name, bool Active, int Port, IReadOnlyList<ConfigModelRow> Models)
+    public sealed record ConfigCard(string Name, bool Active, int Port, string Size,
+                                    IReadOnlyList<ConfigModelRow> Models)
     {
         public string Title => Active ? "● " + Name : Name;
     }
 
-    public sealed record ConfigModelRow(string Id, string Size, string Context, int Port, bool Loaded, bool HasFile)
+    public sealed record ConfigModelRow(string Id, string Size, string Context, bool Loaded)
     {
         public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);
         public bool HasBadge => Badge is not null;
-        public string Facts => $"{Size}  ·  {Context} ctx  ·  :{Port}";
+        public string Facts => $"{Size}  ·  {Context} ctx";
     }
 
     /// <summary>Rebuilds the config cards from the store and the current loaded-model state.</summary>
+    private static readonly Dictionary<string, long> expertBytes = new(StringComparer.OrdinalIgnoreCase);
+
     public void RebuildConfigCards()
     {
         ConfigCards.Clear();
@@ -418,22 +421,57 @@ public sealed class MainViewModel : ObservableObject
             var port = server is not null && int.TryParse(ConfigDocument.Text(server, "port"), out var p)
                 ? p : 8080;
             var rows = new List<ConfigModelRow>();
+            var bytes = 0L;
+            var experts = 0L;
             foreach (var entry in (document["models"] as JsonArray ?? []).OfType<JsonObject>())
             {
                 var model = ConfigDocument.Text(entry, "model") ?? "";
-                var file = LocalFileOf(model);
-                var size = file is not null && File.Exists(file)
-                    ? BasaltLocator.HumanBytes(new FileInfo(file).Length)
-                    : "size unknown";
+                var file = ModelFilePath(model);
+                var length = file is not null ? new FileInfo(file).Length : 0;
+                bytes += length;
+                if (file is not null && file.EndsWith(".basalt", StringComparison.OrdinalIgnoreCase))
+                {
+                    lock (expertBytes)
+                    {
+                        if (!expertBytes.TryGetValue(file, out var known))
+                        {
+                            known = LoadPreview.ExpertBytes(file);
+                            expertBytes[file] = known;
+                        }
+                        experts += known;
+                    }
+                }
+                var size = length > 0 ? BasaltLocator.HumanBytes(length) : "size unknown";
                 var context = ConfigDocument.Int(entry, "max-context");
                 var isLoaded = Path.GetFileName(model).Equals(Path.GetFileName(loaded), StringComparison.OrdinalIgnoreCase);
                 rows.Add(new ConfigModelRow(Path.GetFileNameWithoutExtension(model), size,
-                                            context is { } n ? n.ToString() : "default", port,
-                                            isLoaded, file is not null));
+                                            context is { } n ? n.ToString() : "default", isLoaded));
             }
-            ConfigCards.Add(new ConfigCard(name, Profiles.Active == name, port, rows));
+            var sizeText = bytes > 0
+                ? BasaltLocator.HumanBytes(bytes) + (experts > 0 ? $"  (experts {BasaltLocator.HumanBytes(experts)})" : "")
+                : "";
+            ConfigCards.Add(new ConfigCard(name, Profiles.Active == name, port, sizeText, rows));
         }
         OnUi(RaiseDisplay);
+    }
+
+    /// <summary>Where a model entry's file really is: the entry's own path first, then the models folder,
+    /// then the folder's scanned list. A file that exists on disk always has a size, whatever the folder says.</summary>
+    private string? ModelFilePath(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+            return null;
+        if (File.Exists(model))
+            return model;
+        var folder = Settings.ModelsFolder;
+        if (!string.IsNullOrWhiteSpace(folder))
+        {
+            var candidate = Path.Combine(folder, Path.GetFileName(model));
+            if (File.Exists(candidate))
+                return candidate;
+        }
+        return localModels.FirstOrDefault(f =>
+                   Path.GetFileName(f.File).Equals(Path.GetFileName(model), StringComparison.OrdinalIgnoreCase))?.File;
     }
 
     /// <summary>What the Models card lists: served models first, then the models folder's files.</summary>

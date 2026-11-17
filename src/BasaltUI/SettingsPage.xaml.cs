@@ -372,12 +372,10 @@ public partial class SettingsPage : UserControl
             fields.Children.Clear();
             hint.Text = "Add a model to get started — the path to a .basalt or .gguf file is enough.";
             combo.IsEnabled = false;
-            ConfigPreviewButton.IsEnabled = false;
             return;
         }
         hint.Text = "Only what you set here goes into the file; anything you leave out keeps basalt's default.";
         combo.IsEnabled = true;
-        ConfigPreviewButton.IsEnabled = true;
         BuildScopeFields(fields, entry, "entry", EntryCommon, combo);
     }
 
@@ -517,13 +515,11 @@ public partial class SettingsPage : UserControl
         if (name is null)
         {
             ProfileState.Text = "";
-            ProfileAttached.Text = $"stored in {ConfigProfiles.StorePath}";
             return;
         }
         ProfileState.Text = app.Vm.Profiles.Active == name
             ? "● active — the config file carries this one"
             : "not in the file — a model attaching it applies it";
-        ProfileAttached.Text = $"stored in {ConfigProfiles.StorePath}";
     }
 
     /// <summary>The launch words belong to the config, not to the app: they travel with it in the store.</summary>
@@ -699,33 +695,62 @@ public partial class SettingsPage : UserControl
 
     // ---- the load preview ------------------------------------------------------------------------------------
     // ---- the load preview, on demand --------------------------------------------------------------------------
-    /// <summary>Measure the selected model only when asked, then say what the split would be in the app's
-    /// own dialog — no card parked under the editor taking up the whole page.</summary>
+    /// <summary>A preview of the whole config: every model in it, measured together, shown as bars.</summary>
     private async void PreviewButton_Click(object sender, RoutedEventArgs e)
     {
-        var path = ConfigDocument.Text(entry ?? new JsonObject(), "model");
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (profileName is null)
+            return;
+        var document = app.Vm.Profiles.Document(profileName);
+        if (document is null)
+            return;
+        var engine = document["engine"] as JsonObject ?? [];
+        var options = new List<LoadPreview.Options>();
+        foreach (var node in (document["models"] as JsonArray ?? []).OfType<JsonObject>())
         {
-            Shell.Dialog.Info(W, "Load preview", "There is no model file to measure yet — pick one for this entry first.");
+            var path = ResolveModelFile(ConfigDocument.Text(node, "model") ?? "");
+            if (path is null)
+                continue;
+            options.Add(new LoadPreview.Options(
+                path, new FileInfo(path).Length,
+                ConfigDocument.Text(node, "kv"),
+                ConfigDocument.Int(node, "max-context") ?? 0,
+                ConfigDocument.Int(node, "parallel") ?? 1,
+                ConfigDocument.Text(node, "vision"),
+                ConfigDocument.Switch(engine, "resident-experts") != false,
+                int.TryParse(ConfigDocument.Text(node, "gpu"), out var gpu) ? Math.Max(0, gpu) : 0,
+                S.ModelsFolder,
+                ConfigDocument.Int(engine, "kv-resident") ?? 0));
+        }
+        if (options.Count == 0)
+        {
+            Shell.Dialog.Info(W, "Load preview", "None of this config's model files could be found on disk.");
             return;
         }
         ConfigPreviewButton.IsEnabled = false;
         try
         {
-            var options = PreviewOptions(path);
-            var plan = await Task.Run(() => LoadPreview.ForFile(path, options));
-            var text = plan.Verdict + "\n\n" + string.Join("\n", plan.Rows.Select(r => $"{r.Label}: {r.Value}")) +
-                       (string.IsNullOrWhiteSpace(plan.Note) ? "" : "\n\n" + plan.Note);
-            Shell.Dialog.Info(W, "Load preview — " + Path.GetFileName(path), text);
-        }
-        catch (Exception ex)
-        {
-            Shell.Dialog.Info(W, "Load preview", "Could not read this model file:\n\n" + ex.Message);
+            await LoadPreviewWindow.ShowAsync(W, profileName, options);
         }
         finally
         {
-            ConfigPreviewButton.IsEnabled = entry is not null;
+            ConfigPreviewButton.IsEnabled = true;
         }
+    }
+
+    private string? ResolveModelFile(string wanted)
+    {
+        if (string.IsNullOrWhiteSpace(wanted))
+            return null;
+        if (File.Exists(wanted))
+            return wanted;
+        var folder = S.ModelsFolder;
+        if (!string.IsNullOrWhiteSpace(folder))
+        {
+            var candidate = Path.Combine(folder, Path.GetFileName(wanted));
+            if (File.Exists(candidate))
+                return candidate;
+        }
+        return null;
     }
 
     /// <summary>The entry's own kv, context, slots, vision and GPU, plus the engine's resident-experts switch.</summary>

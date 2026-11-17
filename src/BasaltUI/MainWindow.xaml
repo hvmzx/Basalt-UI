@@ -70,8 +70,11 @@
                             ToolTip="Switch between light and dark">
                         <TextBlock x:Name="ThemeGlyph" Style="{StaticResource Icon}" FontSize="14" />
                     </Button>
-                    <Button Command="{Binding SettingsCommand}" Margin="0,0,2,0" ToolTip="Settings and raw config">
+                    <Button Command="{Binding SettingsCommand}" Margin="0,0,2,0" ToolTip="Settings">
                         <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE713;" /><Run Text="  Settings" /></TextBlock>
+                    </Button>
+                    <Button Click="Configs_Click" Margin="0,0,2,0" ToolTip="Named configs">
+                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE8B7;" /><Run Text="  Configs" /></TextBlock>
                     </Button>
                     <Button Command="{Binding RestartCommand}" Margin="0,0,10,0" ToolTip="Stop, then start again">
                         <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE72C;" /><Run Text="  Restart" /></TextBlock>
@@ -323,7 +326,6 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" MinHeight="140" />
-                            <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
                         <DockPanel Grid.Row="0" LastChildFill="False">
@@ -347,8 +349,15 @@
                                                                 Width="26" Padding="0" ToolTip="Open this config">
                                                             <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE713;" />
                                                         </Button>
+                                                        <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                                                                Click="ConfigWebUi_Click" Tag="{Binding Name}"
+                                                                Width="26" Padding="0" ToolTip="Open this config's web UI">
+                                                            <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE774;" />
+                                                        </Button>
                                                         <TextBlock DockPanel.Dock="Right" Margin="0,0,10,0"
                                                                    Style="{StaticResource Label}" Text="{Binding Port, StringFormat='port {0}'}" />
+                                                        <TextBlock DockPanel.Dock="Right" Margin="0,0,10,0"
+                                                                   Style="{StaticResource Label}" Text="{Binding Size}" />
                                                     </DockPanel>
                                                     <ItemsControl ItemsSource="{Binding Models}" Margin="0,8,0,0">
                                                         <ItemsControl.ItemTemplate>
@@ -389,19 +398,9 @@
                                                                                 <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE768;" />
                                                                             </Button>
                                                                             <Button Style="{StaticResource GhostButton}" Width="24" Padding="0"
-                                                                                    Click="WebUiModel_Click" Tag="{Binding}"
-                                                                                    ToolTip="Open this model's web UI">
-                                                                                <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE774;" />
-                                                                            </Button>
-                                                                            <Button Style="{StaticResource GhostButton}" Width="24" Padding="0"
                                                                                     Click="HistoryModel_Click" Tag="{Binding}"
                                                                                     ToolTip="This model's run history">
                                                                                 <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE81C;" />
-                                                                            </Button>
-                                                                            <Button Style="{StaticResource GhostButton}" Width="24" Padding="0"
-                                                                                    Click="ConfigModelActions_Click" Tag="{Binding}"
-                                                                                    ToolTip="Attach or detach a config">
-                                                                                <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE712;" />
                                                                             </Button>
                                                                         </StackPanel>
                                                                     </Grid>
@@ -429,13 +428,6 @@
                             </TextBlock>
                         </Grid>
 
-                        <DockPanel Grid.Row="2" Margin="0,12,0,0" LastChildFill="False">
-                            <Button DockPanel.Dock="Right" Content="Unload" Command="{Binding UnloadCommand}"
-                                    Margin="0,0,8,0" MinWidth="70"
-                                    ToolTip="Free the memory — nothing stays loaded" />
-                            <Button DockPanel.Dock="Left" Content="Discover more…" Click="BrowseModels_Click"
-                                    ToolTip="Every model on Hugging Face" />
-                        </DockPanel>
                     </Grid>
                 </Border>
             </Grid>

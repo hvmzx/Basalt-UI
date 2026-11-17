@@ -399,11 +399,12 @@ public partial class MainWindow : Window
             _ = Vm.SwitchModelAsync(model.Id);
     }
 
-    private void WebUiModel_Click(object sender, RoutedEventArgs e)
+    /// <summary>The web UI belongs to the config, not to one of its models.</summary>
+    private void ConfigWebUi_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is Button { Tag: MainViewModel.ConfigModelRow model })
-            Vm.OpenWebUiFor(model.Id);
+        if (sender is Button { Tag: string name })
+            Vm.OpenWebUiFor(name);
     }
 
     private void HistoryModel_Click(object sender, RoutedEventArgs e)
@@ -415,80 +416,7 @@ public partial class MainWindow : Window
         new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
     }
 
-    /// <summary>A model's own actions on the main page: attach, detach, open its config.</summary>
-    private void ConfigModelActions_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is not Button { Tag: MainViewModel.ConfigModelRow model })
-            return;
-        var menu = ModelRowMenu(new HomeModelRow(model.Id, "", false, Loaded: model.Loaded));
-        menu.PlacementTarget = sender as Button;
-        menu.IsOpen = true;
-    }
-
-    private ContextMenu ModelRowMenu(HomeModelRow row)
-    {
-        var menu = new ContextMenu();
-        var worn = Vm.Profiles.AssignedTo(row.Id);
-        var active = Vm.Profiles.Active;
-
-        if (worn is not null)
-        {
-            menu.Items.Add(Item($"Edit config “{worn}”…", () => RevealConfig(worn),
-                                tip: "The Configs page, on this config's whole document — its models, server and engine"));
-            menu.Items.Add(Item($"Detach “{worn}”", () => Vm.AttachProfile(row, null),
-                                tip: "Only the link goes — the file is untouched."));
-        }
-
-        var attach = new MenuItem
-        {
-            Header = worn is null ? "Attach a config…" : "Attach a different config…",
-            ToolTip = "Attaching applies it: the file is rewritten from the config's document, this model first in line",
-        };
-        foreach (var name in Vm.Profiles.Names.Where(n => !n.Equals(worn, StringComparison.OrdinalIgnoreCase)))
-            attach.Items.Add(Item(name.Equals(active, StringComparison.OrdinalIgnoreCase)
-                                      ? "● " + name + "   (in the file now)"
-                                      : name, () => Vm.AttachProfile(row, name)));
-        if (worn is not null)
-            attach.Items.Add(Item("(no config)", () => Vm.AttachProfile(row, null)));
-        if (attach.Items.Count == 0)
-            attach.Items.Add(Item("(no configs yet)", () => { }, enabled: false,
-                                  "Make the first one with “New config for this model…” below"));
-        attach.Items.Add(new Separator());
-        attach.Items.Add(Item("New config for this model…", () =>
-        {
-            var name = Vm.NewProfileFor(row);
-            RevealConfig(name);
-        }, tip: "Starts as the config the machine runs now, with this model first in line — a place to diverge from"));
-        menu.Items.Add(attach);
-
-        menu.Items.Add(Item("Show in folder", () => ShowInFolder(row), row.HasFile,
-                            tip: "The file this row stands for, selected in the models folder"));
-        return menu;
-    }
-
-    private static MenuItem Item(string header, Action click, bool enabled = true, string? tip = null)
-    {
-        var item = new System.Windows.Controls.MenuItem
-        { Header = header, IsEnabled = enabled, ToolTip = tip };
-        item.Click += (_, _) => click();
-        return item;
-    }
-
-    /// <summary>Right-click on a model row that stands for a file: the folder with the file selected,
-    /// the same place the config entry points at.</summary>
-    private void ShowInFolder(HomeModelRow row)
-    {
-        var file = Vm.LocalFileOf(row);
-        if (file is null || !File.Exists(file))
-            return;
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "explorer.exe",
-            Arguments = $"/select,\"{file}\"",
-            UseShellExecute = true,
-        });
-    }
+    private void Configs_Click(object sender, RoutedEventArgs e) => ShowPage(Page.Configs);
 
     private void SaveLog_Click(object sender, RoutedEventArgs e)
     {

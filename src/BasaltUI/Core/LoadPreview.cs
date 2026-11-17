@@ -57,8 +57,13 @@ public static class LoadPreview
                                  string? Vision, bool ResidentExperts, int GpuIndex, string? DiskRoot,
                                  long KvResidentCells = 0);
 
+    /// <summary>The byte split a preview settled on, so a window can draw it as three bars instead of a
+    /// paragraph. Ssd is what still has to stream from the file; Total is the model's own size.</summary>
+    public sealed record Tiers(long Vram, long Ram, long Ssd, long Total);
+
     public sealed record Plan(string Title, IReadOnlyList<(string Label, string Value)> Rows,
-                              string Verdict, string Note, bool Ok);
+                              string Verdict, string Note, bool Ok, Tiers? Tiers = null,
+                              Hardware? Hardware = null);
 
     /// <summary>A local file: the section table is read, so the split is as exact as the file allows.</summary>
     public static Plan ForFile(string path, Options o)
@@ -201,7 +206,9 @@ public static class LoadPreview
         if (hw.VramKnown && hw.VramTotal > 0 && hw.VramFree < hw.VramTotal * 9 / 10)
             note = "measured against VRAM free right now — anything else using the GPU lowers this. " + note;
 
-        return new Plan(subject, rows, verdict, note, true);
+        return new Plan(subject, rows, verdict, note, true,
+                        new Tiers(kvInVram + dense + visionTotal + expertsInVram,
+                                  kvInRam + expertsInRam, fromDisk, o.FileBytes), hw);
     }
 
     private static bool IsDynamicVision(string? vision, long visionBytes) =>
@@ -234,6 +241,21 @@ public static class LoadPreview
     }
 
     private static readonly byte[] Magic = "BASALTMF"u8.ToArray();
+
+    /// <summary>The bytes the section table gives to routed experts — the parenthesis on a config card.
+    /// Zero when the file has no table (a .gguf) or cannot be read.</summary>
+    public static long ExpertBytes(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return ReadSplit(path, info.Length)?.Experts ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 
     /// <summary>
     /// Reads the section table from the 64 KiB header (model_format.hpp: FileHeader 64 B, then 128-byte
