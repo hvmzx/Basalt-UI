@@ -163,14 +163,17 @@ files read from disk when it will not — never a palette copy kept for the tool
 | | |
 | --- | --- |
 | `00-cold.png` | the main window on a machine where basalt has never run — every empty state at once |
-| `01-main.png` + `-header -buttons -metrics -log` | the dashboard, with crops at 2× so 1 px borders and small text can actually be read |
+| `01-main.png` + `-header -buttons -metrics -log` | the dashboard, with crops at 2× so 1 px borders and small text can actually be read — the `metrics` crop is the throughput stats row, decode and prefill, each with the average the session has run at and the fastest it ever ran, both since basalt started |
+| `01b-request-rows.png` + `-requests` | the same window with its requests card unfolded by the card's own chevron — the card starts folded, so the default is closed and this is the frame that proves the open side; the card is the last in the left column, so the column is scrolled by arithmetic first. The model rows' monogram tiles are in the window too: named families wear one (QW here), and the row whose name matches no family wears none, by design |
 | `07-machine.png` | the same dashboard with its left column scrolled down to the memory bars — the RAM figure lives under four GPU bars, so short of scrolling there is no picture of it — and the run prints what the two bars say, in words, next to the scroll viewer's extent against its viewport |
 | `02-settings.png` | the form |
 | `02b-settings-server.png` + `-fields` | the Server tab, over the machine's own config file |
 | `02c-settings-models.png` + `-preview` | the Models tab, waited on until the load-preview card has answered |
-| `03-models.png`, `04-models-hint.png` + `-search` | the Hugging Face browser, up to a minute after opening: with a network that is the catalogue, without one it is the browser's own offline error — a state worth seeing — and the second has the box emptied so the field's hint is in the shot |
+| `03-models.png`, `04-models-hint.png` + `-search` | the Hugging Face browser, up to a minute after opening: with a network that is the catalogue — every row wearing a monogram tile for the family named in its name or repo owner, QW and DS among them, none when nothing matched — without one it is the browser's own offline error, a state worth seeing; the second has the box emptied so the field's hint is in the shot |
+| `08-downloads.png` + `-active -history` | the downloads centre over three synthetic transfers — one on its way with live figures and a bar, one done, one failed with its reason — the seeds go into the centre's own list and are cleared before the next window |
 | `05-dialog.png` | the question box, built through its private constructor and shown non-modally for the capture |
 | `06-notes.png` | a release's notes as a page over the dashboard, which also proves the header's arrow and title switch and exercises the markdown |
+| `09-history.png` + `-rows` | one model's history — the window that answers "how fast has it run": the run wipes the recorder's file first, so the frame is exactly the seed's two lines, the live session the app counted (`now`) and the `≈` line the engine's three-hour totals owed for the time the app was away, and the run prints both lines twice — from the view model and from the window's own rows — so the picture can be checked in words |
 
 Each window is shown at `Left = Top = -32000` off every monitor, the dispatcher is pumped to idle, the
 layout updated, and the tree rasterised straight into a `RenderTargetBitmap` at 1.5× — so this exercises
@@ -190,13 +193,14 @@ Two things about that rasterisation are worth knowing before trusting an image:
   writable folder when it cannot, or the log pane in the shot says so instead of showing the dashboard.
 
 Everything in those pictures is seeded, and it is seeded through the front door: one made-up `ServerStatus`
-is handed over the same way a poller beat arrives (a reflection call on the private `OnStatus`, and that is
-the only reflection in the tool apart from emptying the search box), so the model list, the request table
-and the warnings are rebuilt by the same code a real beat rebuilds them. That is deliberate — a machine
-whose server has served exactly three requests does not show what a long session looks like, and a
-sparkline that photographs flat tells a reviewer nothing. It also means the images are the same on any
-machine: this one's server is a 145 GB model, and the previous run of this tool drew whatever that had
-been doing.
+is handed over the same way a poller beat arrives — a reflection call on the private `OnStatus`, the only
+reflection that touches the app's data; the rest reads named fields to place the camera — so the model
+list, the request table and the warnings are rebuilt by the same code a real beat rebuilds them. That is
+deliberate — a machine whose server has served exactly three requests does not show what a long session
+looks like, and a sparkline that photographs flat tells a reviewer nothing. It also means the images are
+the same on any machine: this one's server is a 145 GB model, and the previous run of this tool drew
+whatever that had been doing. The recorder's file is wiped before the first window for the same reason —
+the history frame is the seed's two lines on every machine, never the machine's own past.
 
 Nothing here starts, stops or restarts anything, and nothing here reaches the desktop: showing a window
 starts the app's own start-up, which takes the single-instance lock, so the tool runs `ShotsApp`, the

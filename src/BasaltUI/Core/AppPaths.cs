@@ -39,6 +39,9 @@ public static class AppPaths
     /// <summary>Where a newer basalt release is downloaded and unpacked before anything of yours is touched.</summary>
     public static string UpdateDir => Path.Combine(Root, "updates");
 
+    /// <summary>How fast each model has run, per engine session: the model rows' history.</summary>
+    public static string ThroughputFile => Path.Combine(Root, "model-throughput.json");
+
     static AppPaths() => Place();
 
     private static void Place()

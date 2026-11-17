@@ -61,6 +61,8 @@ public partial class MainWindow : Window
         app.Downloads.ListChanged += RefreshDownloadsLink;
         app.Downloads.ItemChanged += _ => RefreshDownloadsLink();
         RefreshDownloadsLink();
+
+        SetRequestsCollapsed(Vm.Settings.RecentRequestsCollapsed);
     }
 
     /// <summary>The footer's centre word: the count when something is coming down.</summary>
@@ -341,6 +343,40 @@ public partial class MainWindow : Window
 
     // ---- models on Hugging Face ---------------------------------------------------------------------------------
     private void BrowseModels_Click(object sender, RoutedEventArgs e) => Vm.OpenModelsBrowser();
+
+    // ---- the request table folds away, and the fold is remembered ---------------------------------------
+    /// <summary>
+    /// Fold the recent-requests table away — the card's one line stays — or bring it back. The chevron
+    /// always points the way it is about to go, and the choice is the app's memory: the next run opens
+    /// with the same eye it closed with.
+    /// </summary>
+    public void SetRequestsCollapsed(bool collapsed)
+    {
+        if (RequestsBody is null)
+            return;
+        RequestsBody.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        RequestsToggleGlyph.Text = collapsed ? "\uE70D" : "\uE70E";
+    }
+
+    private void RequestsToggle_Click(object sender, RoutedEventArgs e)
+    {
+        SetRequestsCollapsed(RequestsBody.Visibility != Visibility.Collapsed);
+        Vm.Settings.RecentRequestsCollapsed = RequestsBody.Visibility == Visibility.Collapsed;
+        Vm.Settings.Save();
+    }
+
+    /// <summary>
+    /// One model's history: every session of basalt the app watched it run, newest first. The window asks
+    /// the view model, which asks the recorder, so the list always says what was actually seen — and the
+    /// time the app was away, counted from the engine's own totals, stands as its own ≈ line.
+    /// </summary>
+    private void History_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Button { Tag: HomeModelRow row })
+            return;
+        new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
+    }
 
     private void SaveLog_Click(object sender, RoutedEventArgs e)
     {

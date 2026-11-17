@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:cv="clr-namespace:BasaltUI.Converters"
+        xmlns:c="clr-namespace:BasaltUI.Controls"
         Title="Find a model — Hugging Face"
         Width="1060" Height="680" MinWidth="740" MinHeight="440"
         WindowStartupLocation="CenterOwner"
@@ -123,6 +124,11 @@
                                 <Border Background="{DynamicResource SurfaceHi}" CornerRadius="9" Padding="12,9">
                                     <StackPanel>
                                         <DockPanel LastChildFill="True">
+                                            <c:Badge DockPanel.Dock="Left" Width="24" Height="24" Margin="0,1,8,0"
+                                                     VerticalAlignment="Top"
+                                                     Identity="{Binding Badge}"
+                                                     Visibility="{Binding HasBadge, Converter={x:Static cv:BoolToVisibility.Instance}}"
+                                                     ToolTip="{Binding Badge.Tip}" />
                                             <Border DockPanel.Dock="Right" Background="{DynamicResource AccentSoft}"
                                                     CornerRadius="4" Padding="6,2" Margin="8,0,0,0"
                                                     Visibility="{Binding Official, Converter={x:Static cv:BoolToVisibility.Instance}}">

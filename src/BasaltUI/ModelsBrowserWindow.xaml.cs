@@ -423,6 +423,13 @@ public partial class ModelsBrowserWindow : Window
         public string Owner => Repo.Owner;
         public string Facts => Repo.FactsText;
         public string LikeMark { get; }
+
+        /// <summary>
+        /// The family mark to wear next to the name — by the name itself, or the owner when only the
+        /// owner announces it. Null when nothing known matches, and a row with a null wears no tile.
+        /// </summary>
+        public ModelIdentity.Identity? Badge => ModelIdentity.For(Name, Owner);
+        public bool HasBadge => Badge is not null;
     }
 
     private sealed class FileRow : ObservableObject

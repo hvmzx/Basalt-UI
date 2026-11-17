@@ -1,0 +1,82 @@
+<Window x:Class="BasaltUI.ModelHistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:cv="clr-namespace:BasaltUI.Converters"
+        Title="Model history"
+        Width="760" Height="440" MinWidth="580" MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None"
+        Background="{StaticResource Window}"
+        Foreground="{StaticResource TextPrimary}"
+        FontFamily="{StaticResource FontText}" FontSize="13"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display"
+        ShowInTaskbar="False">
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="44" ResizeBorderThickness="8,8,8,8" GlassFrameThickness="0"
+                            CornerRadius="0" UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Grid Margin="24,0,24,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="52" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ============ header ============ -->
+        <Grid Grid.Row="0" VerticalAlignment="Center" shell:WindowChrome.IsHitTestVisibleInChrome="True">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,16,0">
+                <TextBlock x:Name="TitleText" FontWeight="SemiBold" FontSize="14"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="TitleDetail" Style="{StaticResource Label}" Margin="0,2,0,0"
+                           TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <Button Grid.Column="1" Style="{StaticResource CaptionCloseButton}" Content="&#xE8BB;"
+                    Click="Close_Click" ToolTip="Close" />
+        </Grid>
+
+        <!-- ============ the sessions ============ -->
+        <Grid Grid.Row="1" Margin="0,12,0,0">
+            <ListView x:Name="RowsList"
+                      ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                      ScrollViewer.VerticalScrollBarVisibility="Auto">
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="since" Width="118" DisplayMemberBinding="{Binding When}" />
+                        <GridViewColumn Header="state" Width="72" DisplayMemberBinding="{Binding State}" />
+                        <GridViewColumn Header="requests" Width="68" DisplayMemberBinding="{Binding Requests}" />
+                        <GridViewColumn Header="decode tok/s · avg / max" Width="180"
+                                        DisplayMemberBinding="{Binding Decode}" />
+                        <GridViewColumn Header="prefill tok/s · avg / max" Width="200"
+                                        DisplayMemberBinding="{Binding Prefill}" />
+                    </GridView>
+                </ListView.View>
+            </ListView>
+            <TextBlock Margin="18,16,18,12" TextWrapping="Wrap"
+                       Text="nothing here yet — one line arrives for every run of basalt this model has seen while this app was open">
+                <TextBlock.Style>
+                    <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource EmptyNote}">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding ElementName=RowsList, Path=HasItems}" Value="False">
+                                <Setter Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Grid>
+
+        <!-- ============ what the lines mean ============ -->
+        <TextBlock Grid.Row="2" Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                   Margin="0,10,0,0" TextWrapping="Wrap"
+                   Text="Each line is one session of basalt — one per time the engine started — as far as this app could see it. The app only records while it is running; time it was away comes back as one line marked ≈, counted from the engine's own totals since it started." />
+    </Grid>
+</Window>

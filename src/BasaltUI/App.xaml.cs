@@ -377,6 +377,10 @@ public partial class App : Application
         }
         Settings.Save();
 
+        // The session under way is history once the app is gone, and the file carries the open session's
+        // running counts so the next run continues the count instead of starting it over.
+        Vm.CloseSessions();
+
         Downloads.StopForExit();
         Poller.Dispose();
         tray?.Dispose();

@@ -13,7 +13,17 @@ public sealed record GpuRow(int Index, string? Name, double Util, long MemUsed, 
 public sealed record RequestRow(string Id, string Path, double Time, double DurationS, string Finish,
                                 long PromptTokens, long Reused, long OutputTokens, double DecodeTokS,
                                 double HitRate, double TtftS, double PcieShare, double? SsdShare,
-                                long DraftsOffered, long DraftsAccepted);
+                                long DraftsOffered, long DraftsAccepted, double PromptMs = 0)
+{
+    /// <summary>
+    /// How fast the fresh part of the prompt went in, when the engine says how long it took: the cached
+    /// tokens cost nothing, so the speed is the new tokens over prompt_ms. Zero when the engine does not
+    /// report the time, or nothing was fresh.
+    /// </summary>
+    public double PrefillTokS => PromptMs > 0 && PromptTokens > Reused
+        ? (PromptTokens - Reused) / (PromptMs / 1000.0)
+        : 0;
+}
 
 public sealed record ModelRow(string Id, string Status, bool Asleep, long NCtx, bool Vision)
 {
@@ -37,6 +47,26 @@ public sealed record ModelRow(string Id, string Status, bool Asleep, long NCtx, 
 }
 
 public sealed record RequestQueueRow(string Api, string Model, long PromptTokens, double WaitedS);
+
+/// <summary>
+/// What the engine counted since it started, in its own words: every request, every token, every
+/// millisecond of prompt and decode. The basalt build that has these counters answers with them; an older
+/// one leaves the whole block out, and the panel falls back to counting the recent request table itself.
+/// </summary>
+public sealed record MetricsTotals(long Since, long Requests, long Prompt, long Reused, long Written,
+                                   double PromptMs, double DecodeMs)
+{
+    /// <summary>The decode speed the session averaged, over the whole of it.</summary>
+    public double AverageDecodeTokS => DecodeMs > 0 ? Written / (DecodeMs / 1000.0) : 0;
+
+    /// <summary>The prefill speed the session averaged. Cached tokens are excluded — they are not work.</summary>
+    public double AveragePrefillTokS => PromptMs > 0 && Prompt > Reused
+        ? (Prompt - Reused) / (PromptMs / 1000.0)
+        : 0;
+}
+
+/// <summary>The fastest the engine has been at each of the two halves of serving, for this start of it.</summary>
+public sealed record MetricsBest(double PrefillTokS, double DecodeTokS);
 
 /// <summary>
 /// One reading of a running server, flattened into what the UI shows. Everything is optional: a field a
@@ -110,6 +140,10 @@ public sealed record ServerStatus
     public double[] GpuUtilHistory { get; init; } = [];
     public double[] GpuPowerHistory { get; init; } = [];
     public double[] GpuTempHistory { get; init; } = [];
+
+    // session counters, engine 0.4.0 and newer; everything before them answers without these
+    public MetricsTotals? Totals { get; init; }
+    public MetricsBest? Best { get; init; }
 
     // /props extras, only fetched once in a while
     public string BuildInfo { get; init; } = "";
@@ -380,7 +414,8 @@ internal static class ServerStatusParser
             r.Get("pcie_share").D(),
             r.Get("ssd_share").DN(),
             r.Get("drafts_offered").L(),
-            r.Get("drafts_accepted").L())).ToList();
+            r.Get("drafts_accepted").L(),
+            r.Get("prompt_ms").D())).ToList();
 
         var models = root.Get("models").Arr().Select(m => new ModelRow(
             m.Get("id").S(),
@@ -393,6 +428,26 @@ internal static class ServerStatusParser
             q.Get("api").S(), q.Get("model").S(), q.Get("prompt_tokens").L(), q.Get("waited_s").D())).ToList();
 
         var slotHist = hist.Get("slot_tok_s").Arr().Select(a => a.Numbers()).ToArray();
+
+        // The two session counters, when this build keeps them. An object with no content is the same as
+        // no object: a server that starts with nothing served answers totals {} and best {}.
+        var totals = root.Get("totals");
+        MetricsTotals? totalsValue = null;
+        if (totals is { ValueKind: JsonValueKind.Object } t && t.Get("requests").L() > 0)
+            totalsValue = new MetricsTotals(
+                Since: t.Get("since").L(), Requests: t.Get("requests").L(), Prompt: t.Get("prompt").L(),
+                Reused: t.Get("reused").L(), Written: t.Get("written").L(),
+                PromptMs: t.Get("prompt_ms").D(), DecodeMs: t.Get("decode_ms").D());
+
+        var best = root.Get("best");
+        MetricsBest? bestValue = null;
+        if (best is { ValueKind: JsonValueKind.Object } b)
+        {
+            var p = b.Get("prefill").Get("tok_s").D();
+            var d = b.Get("decode").Get("tok_s").D();
+            if (p > 0 || d > 0)
+                bestValue = new MetricsBest(p, d);
+        }
 
         var gpuHist = hist.Get("gpus").Arr().FirstOrDefault();
         var swap = DescribeSwap(root.Get("swap"));
@@ -457,6 +512,9 @@ internal static class ServerStatusParser
             GpuUtilHistory = gpuHist.Get("util").Filled(),
             GpuPowerHistory = gpuHist.Get("power").Filled(),
             GpuTempHistory = gpuHist.Get("temp").Filled(),
+
+            Totals = totalsValue,
+            Best = bestValue,
         };
     }
 

@@ -61,6 +61,14 @@ public sealed class MainViewModel : ObservableObject
     private ServerStatus status = ServerStatus.Down("");
 
     /// <summary>
+    /// The app's own record of how fast each model has actually run, per model, per session of the engine:
+    /// it is where the Models card's per-model number and the history window come from. The beat that draws
+    /// the screen feeds it, so the recorder can never be told about a request the screen was not told about.
+    /// </summary>
+    private readonly ThroughputRecorder throughput = new();
+    public ThroughputRecorder Throughput => throughput;
+
+    /// <summary>
     /// RAM and GPU memory as Windows measures them, refreshed with every beat — the same figures Task Manager
     /// shows, and available whether or not a server is answering. The engine's own memory numbers stay in the
     /// stats it reports; the machine rows on this window are the machine's.
@@ -227,6 +235,38 @@ public sealed class MainViewModel : ObservableObject
 
     public string DecodeValue => status.TokS is { } t ? t.ToString("0.0") + " tok/s" : "—";
     public string PrefillValue => status.PrefillTokS is { } p ? p.ToString("0") + " tok/s" : "—";
+
+    /// <summary>
+    /// The session's whole decode, in the engine's own totals since it started: what it averaged, and the
+    /// fastest it ever got. The live sparkline shows only the moment, so these two numbers are the only
+    /// place the session's shape is visible.
+    /// </summary>
+    public string DecodeStatsText
+    {
+        get
+        {
+            if (status.Totals is { Requests: > 0 })
+                return $"decode avg {status.Totals.AverageDecodeTokS:0.#} · max {status.Best?.DecodeTokS ?? 0:0.#} tok/s";
+            var rows = status.Requests.Where(r => r.DecodeTokS > 0).Select(r => r.DecodeTokS).ToList();
+            if (rows.Count == 0)
+                return "decode — not yet";
+            return $"decode avg {rows.Average():0.#} · max {rows.Max():0.#} tok/s (recent)";
+        }
+    }
+
+    /// <summary>The session's whole prefill: what the engine averaged while reading fresh prompts, and its record.</summary>
+    public string PrefillStatsText
+    {
+        get
+        {
+            if (status.Totals is { Requests: > 0 })
+                return $"prefill avg {status.Totals.AveragePrefillTokS:N0} · max {status.Best?.PrefillTokS ?? 0:N0} tok/s";
+            var rows = status.Requests.Where(r => r.PrefillTokS > 0).Select(r => r.PrefillTokS).ToList();
+            if (rows.Count == 0)
+                return "prefill — not yet";
+            return $"prefill avg {rows.Average():N0} · max {rows.Max():N0} tok/s (recent)";
+        }
+    }
     public string GpuNameText => Gpu?.Name is { Length: > 0 } name ? name
                                : machine.Video.Name is { Length: > 0 } card ? card
                                : "no gpu reported";
@@ -334,7 +374,8 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>Everything recomputed from one /metrics reading.</summary>
     private static readonly string[] DisplayProps =
     [
-        nameof(DecodeValue), nameof(PrefillValue), nameof(GpuNameText), nameof(GpuUtilFraction), nameof(GpuUtilValue),
+        nameof(DecodeValue), nameof(PrefillValue), nameof(DecodeStatsText), nameof(PrefillStatsText),
+        nameof(GpuNameText), nameof(GpuUtilFraction), nameof(GpuUtilValue),
         nameof(GpuMemFraction), nameof(GpuMemText), nameof(GpuTempFraction), nameof(GpuTempHot), nameof(GpuTempValue),
         nameof(GpuPowerFraction), nameof(GpuPowerText), nameof(CpuFraction), nameof(CpuText),
         nameof(RamFraction), nameof(RamText), nameof(ExpertFraction), nameof(ExpertText), nameof(VramFreeText),
@@ -1484,6 +1525,7 @@ public sealed class MainViewModel : ObservableObject
     {
         Status = snapshot;
         machine = poller.Machine;       // read on the same beat, off the UI thread: Windows' own figures
+        throughput.Observe(snapshot);   // the recorder keeps its counts with the same beat the screen reads
         RaiseAll(nameof(DecodeSeries), nameof(PrefillSeries), nameof(GpuUtilSeries), nameof(GpuPowerSeries),
                  nameof(GpuTempSeries));
         RaiseDisplay();
@@ -1515,6 +1557,42 @@ public sealed class MainViewModel : ObservableObject
         RebuildWarnings(snapshot);
         MaybeProbeServed();      // the card's dedup asks the router what names it serves; answers may redraw it
     });
+
+    // ---- the recorder's hand to the row and the window ----------------------------------------------------------
+    /// <summary>
+    /// The one number a model row can say about its past: the average decode speed of the session under way
+    /// when one is, else the last closed session's average, said to be last. Blank while the app has seen
+    /// nothing for this model — a row that has no history should not wear a number.
+    /// </summary>
+    private string StatsOf(string key)
+    {
+        if (key.Length == 0)
+            return "";
+        var list = Throughput.Sessions(key);
+        var live = list.FirstOrDefault(s => s.Current && s.AvgDecodeTokS > 0);
+        if (live is not null)
+            return $"avg {live.AvgDecodeTokS:0.#} tok/s";
+        var last = list.FirstOrDefault(s => !s.Current && s.AvgDecodeTokS > 0);
+        return last is null ? "" : $"last {last.AvgDecodeTokS:0.#} tok/s · {last.Requests} req";
+    }
+
+    /// <summary>
+    /// What the history window asks for about one model row: every session the app recorded for it, the live
+    /// one first, then the closed ones newest first.
+    /// </summary>
+    public IReadOnlyList<ModelSession> HistoryFor(HomeModelRow row)
+    {
+        foreach (var key in new[] { row.Key, row.Id })
+            if (key.Length > 0 && Throughput.HasAnything(key))
+                return Throughput.Sessions(key);
+        return Array.Empty<ModelSession>();
+    }
+
+    /// <summary>
+    /// The app is going away: the session under way becomes history, and the file is written before the
+    /// answer, because nobody will be around to finish a deferred save after the process is gone.
+    /// </summary>
+    public void CloseSessions() => OnUi(throughput.CloseSessions);
 
     private void RebuildRows(ServerStatus snapshot)
     {
@@ -1602,19 +1680,21 @@ public sealed class MainViewModel : ObservableObject
 
         foreach (var f in localModels)
         {
-            string detail;
+            string detail, key;
             var loaded = false;
             if (faces.TryGetValue(f.Name, out var m))
             {
                 loaded = m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase);
                 detail = m.Detail;                          // loaded · 262,144 ctx · vision — the server's words
+                key = m.Id;                                 // the server's name for this row is what the recorder counts
             }
             else
             {
                 var ctx = EntryContextOf(f.Name);
                 detail = f.Detail + (ctx > 0 ? $" · {ctx:N0} ctx" : "");
+                key = f.Name;
             }
-            rows.Add(new HomeModelRow(f.Name, detail, Live: false, Loaded: loaded));
+            rows.Add(new HomeModelRow(f.Name, detail, Live: false, Loaded: loaded, Stats: StatsOf(key), Key: key));
         }
 
         foreach (var m in served)
@@ -1622,10 +1702,11 @@ public sealed class MainViewModel : ObservableObject
             if (claimed.Contains(m.Id))
                 continue;
             rows.Add(new HomeModelRow(m.Id, m.Detail, Live: true,
-                                      Loaded: m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase)));
+                                      Loaded: m.Status.Trim().Equals("loaded", StringComparison.OrdinalIgnoreCase),
+                                      Stats: StatsOf(m.Id), Key: m.Id));
         }
 
-        var ids = string.Join("|", rows.Select(r => r.Id + ":" + r.Detail));
+        var ids = string.Join("|", rows.Select(r => r.Id + ":" + r.Detail + ":" + r.Stats));
         if (ids == lastDisplayIds)
             return;
         lastDisplayIds = ids;
@@ -1892,7 +1973,14 @@ public sealed class MainViewModel : ObservableObject
 }
 
 /// <summary>One row of the Models card: a model the server serves, or a file in the models folder.</summary>
-public sealed record HomeModelRow(string Id, string Detail, bool Live, bool Loaded = false);
+public sealed record HomeModelRow(string Id, string Detail, bool Live, bool Loaded = false,
+                                  string Stats = "", string Key = "")
+{
+    /// <summary>The family mark the row wears; null when the name matches no known family, and a null row wears no tile.</summary>
+    public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);
+
+    public bool HasBadge => Badge is not null;
+}
 
 /// <summary>A model file sitting in the models folder, as the folder itself reports it.</summary>
 public sealed record LocalModelRow(string File, long Bytes, DateTime Changed)

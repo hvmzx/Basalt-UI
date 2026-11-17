@@ -158,6 +158,12 @@ public sealed class AppSettings
 
     public bool CheckForUpdates { get; set; } = true;
 
+    /// <summary>
+    /// The recent-requests card starts folded, because its whole purpose is the card's one summary line —
+    /// the list is only there when you are asking what just happened.
+    /// </summary>
+    public bool RecentRequestsCollapsed { get; set; } = true;
+
     /// <summary>A release this version of the app has already been told about and chose not to mention again.</summary>
     public string DismissedUpdateTag { get; set; } = "";
 

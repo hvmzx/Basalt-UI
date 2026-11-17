@@ -42,6 +42,10 @@ internal static class Program
         var dir = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "basalt-shots");
         Directory.CreateDirectory(dir);
 
+        // Every run is a fresh install: whatever session memory a previous run left in the home folder would
+        // otherwise rehydrate as lines in the history window and the frames would differ between runs.
+        try { File.Delete(BasaltUI.Core.AppPaths.ThroughputFile); } catch { /* nothing to lose */ }
+
         var app = new ShotsApp();
 
         // WPF would otherwise end the Application the moment one of these windows closes, and the next
@@ -75,6 +79,10 @@ internal static class Program
 
         Seed(app.Vm);
 
+        // The stats chips in the header must be checkable in words too: the bound text, straight from the
+        // view model the dashboard reads it from.
+        Console.WriteLine($"  stats chips: “{app.Vm.DecodeStatsText}”   “{app.Vm.PrefillStatsText}”");
+
         // Whether the capture path itself can paint anything this machine will not give a shown window.
         ProbePipeline();
 
@@ -83,6 +91,27 @@ internal static class Program
                          ("buttons", 1020, 15, 620, 60),
                          ("metrics", 30, 185, 930, 280),
                          ("log", 20, 790, 1060, 130));
+
+        // The request table unfolded: the card's own chevron did the work — the card starts folded by
+        // default, so the same window is taken once with its eye open. The requests card is the last card
+        // down the left column and sits below the fold, so the column is scrolled by arithmetic first.
+        var expanded = new MainWindow(app);
+        expanded.SetRequestsCollapsed(false);
+        AfterLayout = window =>
+        {
+            var body = Field<System.Windows.Controls.Grid>(window, "RequestsBody");
+            var scroll = body is null ? null : Ancestor<ScrollViewer>(body);
+            if (body is not null && scroll is not null)
+            {
+                scroll.ScrollToVerticalOffset(scroll.ScrollableHeight);
+                Console.WriteLine($"  left column scrolled to the bottom ({scroll.ScrollableHeight:F0} px) to reach the requests card");
+            }
+            else
+                Console.WriteLine("  requests card or its scroll viewer not found");
+        };
+        written += Shoot(expanded, Path.Combine(dir, "01b-request-rows.png"), maps,
+                         ("requests", 30, 330, 960, 400));
+        AfterLayout = null;
 
         // Same window, left column scrolled down to the RAM bar. The dashboard's memory figures are the ones
         // being argued over, and the RAM bar sits under four GPU bars, so at this height it lives below the
@@ -262,10 +291,40 @@ internal static class Program
             "2026-11-12", []));
         written += Shoot(notesWindow, Path.Combine(dir, "06-notes.png"), maps);
 
+        // One model's history: the window that answers "how fast has it run?" The seeded beat left the
+        // view model's recorder with an open session for the loaded model and, under it, the ≈ line the
+        // engine's three-hour totals owed the app for the time it was away. Both lines are its data.
+        try
+        {
+            var histRow = new HomeModelRow("qwen3.8-flash-next", "loaded · 262,144 ctx · vision",
+                                           Live: true, Loaded: true, Key: "qwen3.8-flash-next");
+            var histData = app.Vm.HistoryFor(histRow);
+            Console.WriteLine($"  history sessions for {histRow.Key}: {histData.Count}");
+            foreach (var s in histData)
+                Console.WriteLine($"    since={s.Since:o} req={s.Requests} decode=“{s.DecodeRange}” prefill=“{s.PrefillRange}” now={s.Current} gap={s.Gap}");
+            var history = new ModelHistoryWindow(histRow, app.Vm);
+            // What the window's own Refresh() put in the list is what the image shows; print it, because a
+            // frame that looks right must be verifiable in words. The private Line prints itself.
+            var rowsField = history.GetType().GetField("RowsList",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            var rowsSource = (rowsField?.GetValue(history) as System.Windows.Controls.ItemsControl)
+                ?.ItemsSource as System.Collections.IEnumerable;
+            var builtRows = rowsSource?.Cast<object>().ToList() ?? [];
+            Console.WriteLine($"  rows the window built: {builtRows.Count}");
+            foreach (var built in builtRows)
+                Console.WriteLine($"    {built}");
+            written += Shoot(history, Path.Combine(dir, "09-history.png"), maps,
+                             ("rows", 20, 56, 700, 190));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"  history shot failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
         // These windows were shown to give them a render target and then hidden; one of them may otherwise
         // keep the process company. The images are written and flushed by now.
-        Environment.Exit(written >= 6 ? 0 : 1);
-        return written >= 6 ? 0 : 1;
+        Environment.Exit(written >= 9 ? 0 : 1);
+        return written >= 9 ? 0 : 1;
     }
 
     /// <summary>
@@ -812,7 +871,7 @@ internal static class Program
     // warnings from it — anything added first is cleared by the same call.
     private static void Seed(MainViewModel vm)
     {
-        vm.Append("watching 127.0.0.1:8080 — basalt 0.3.2, one model loaded, ctx 262144, RTX 5090", LogSource.App);
+        vm.Append("watching 127.0.0.1:8080 — basalt 0.4.0, one model loaded, ctx 262144, RTX 5090", LogSource.App);
         vm.Append("registered Qwen3.8-Flash-Next UD-IQ3_XXS · 96 shards · 145.0 GB · 00:41 to load", LogSource.Server);
         vm.Append("kv cache int8 · 262144 tokens · 78.4 GB of 80.0 GB used on device 0", LogSource.Server);
         vm.Append("POST /v1/chat/completions 200 · 6.42s · 312 tokens out · 48.6 tok/s · 97.8% cache hit", LogSource.Server);
@@ -829,11 +888,11 @@ internal static class Program
         var requests = new[]
         {
             new RequestRow("1042", "/v1/chat/completions", 6.42, 6.42, "eos",
-                           1831, 1792, 312, 48.6, 0.978, 0.083, 0.11, null, 418, 297),
+                           1831, 1792, 312, 48.6, 0.978, 0.083, 0.11, null, 418, 297, 5.1),
             new RequestRow("1043", "/v1/completions", 1.08, 1.08, "length",
-                           6042, 6016, 256, 52.1, 0.996, 0.061, 0.09, 0.02, 301, 244),
+                           6042, 6016, 256, 52.1, 0.996, 0.061, 0.09, 0.02, 301, 244, 3.2),
             new RequestRow("1044", "/v1/chat/completions", 0.31, 0.31, "stop",
-                           288, 0, 34, 41.2, 0.0, 0.074, 0.13, null, 40, 22),
+                           288, 0, 34, 41.2, 0.0, 0.074, 0.13, null, 40, 22, 24.0),
         };
         var gpu = new GpuRow(0, "RTX 5090", 62, Gib(78), Gib(80), 61, 412, 570, 5, 11.2, 3.4);
 
@@ -847,8 +906,8 @@ internal static class Program
             Loaded = true,
             MaxContext = 262144,
             Images = true,
-            EngineVersion = "0.3.2",
-            BuildInfo = "basalt 0.3.2 · cuda 12.9",
+            EngineVersion = "0.4.0",
+            BuildInfo = "basalt 0.4.0 · cuda 12.9",
             Quant = "UD-IQ3_XXS",
             Kv = "int8",
             GpuIds = "0",
@@ -880,6 +939,13 @@ internal static class Program
             Spill = "312 MiB at 1.9 GB/s",
             Requests = requests,
             Models = models,
+            // The engine's own session totals — three hours of running, most of it unseen: they are what
+            // the throughput stats row and the history window's ≈ line draw from.
+            Totals = new MetricsTotals(
+                Since: (long)(DateTime.UtcNow.AddHours(-3) - DateTime.UnixEpoch).TotalSeconds,
+                Requests: 24, Prompt: 509_038, Reused: 432_858, Written: 12_494,
+                PromptMs: 14_669, DecodeMs: 97_030),
+            Best = new MetricsBest(PrefillTokS: 8_975.8, DecodeTokS: 172.4),
             TokSHistory = Curve(38, 58, 60),
             PrefillHistory = Curve(240, 980, 60),
             SlotHistories = [Curve(20, 52, 60), Curve(0, 0, 60), Curve(0, 0, 60), Curve(0, 0, 60)],

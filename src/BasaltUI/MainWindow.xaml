@@ -241,7 +241,19 @@
                                              Values="{Binding PrefillSeries}" ValueText="{Binding PrefillValue}"
                                              Stroke="{DynamicResource Slate}" />
                             </Grid>
-                            <DockPanel Margin="0,12,0,0" LastChildFill="False">
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding DecodeStatsText}" Style="{StaticResource Label}"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="The whole session, not the last minute: what decoding averaged since basalt started, and the fastest it ever got. The engine's own counters — nothing here is a guess." />
+                                <TextBlock Grid.Column="1" Text="{Binding PrefillStatsText}" Style="{StaticResource Label}"
+                                           TextTrimming="CharacterEllipsis" HorizontalAlignment="Right"
+                                           ToolTip="What reading fresh prompts averaged since basalt started, and the record. Reused context is not prefill — the engine already had it, so it never slows this number down." />
+                            </Grid>
+                            <DockPanel Margin="0,10,0,0" LastChildFill="False">
                                 <TextBlock DockPanel.Dock="Left" Text="{Binding QueueText}" Style="{StaticResource Chip}" />
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding EngineLine}" Style="{StaticResource Label}"
                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -252,11 +264,18 @@
                     <Border Style="{StaticResource Card}" Margin="0,14,0,0">
                         <StackPanel>
                             <DockPanel LastChildFill="False">
+                                <Button x:Name="RequestsToggle" DockPanel.Dock="Left" Style="{StaticResource GhostButton}"
+                                        Click="RequestsToggle_Click" Padding="4,2" Margin="0,0,6,0"
+                                        VerticalAlignment="Center"
+                                        ToolTip="Fold the table away, or bring it back — the card keeps whatever one line it has either way">
+                                    <TextBlock x:Name="RequestsToggleGlyph" FontFamily="{StaticResource FontIcon}"
+                                               FontSize="12" Text="&#xE70D;" />
+                                </Button>
                                 <TextBlock DockPanel.Dock="Left" Text="Recent requests" Style="{StaticResource CardTitle}" />
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding Status.SeenAt, StringFormat=last read {0:HH:mm:ss}}"
                                            Style="{StaticResource Label}" />
                             </DockPanel>
-                            <Grid Margin="0,10,0,0" Height="196">
+                            <Grid x:Name="RequestsBody" Margin="0,10,0,0" Height="196">
                                 <ListView x:Name="RequestsList"
                                           ItemsSource="{Binding Recent}"
                                           ScrollViewer.HorizontalScrollBarVisibility="Auto"
@@ -318,21 +337,42 @@
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <StackPanel Margin="2,2">
-                                            <TextBlock Text="{Binding Id}" TextTrimming="CharacterEllipsis">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="{x:Type TextBlock}">
-                                                        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
-                                                        <Style.Triggers>
-                                                            <!-- green: the model the server is serving right now -->
-                                                            <DataTrigger Binding="{Binding Loaded}" Value="True">
-                                                                <Setter Property="Foreground" Value="{DynamicResource Good}" />
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <c:Badge Grid.Column="0" Width="24" Height="24" Margin="0,0,8,0"
+                                                         VerticalAlignment="Center"
+                                                         Identity="{Binding Badge}"
+                                                         Visibility="{Binding HasBadge, Converter={x:Static cv:BoolToVisibility.Instance}}"
+                                                         ToolTip="{Binding Badge.Tip}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Id}" TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="{x:Type TextBlock}">
+                                                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+                                                            <Style.Triggers>
+                                                                <!-- green: the model the server is serving right now -->
+                                                                <DataTrigger Binding="{Binding Loaded}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource Good}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <Button Grid.Column="2" Style="{StaticResource GhostButton}" Content="history"
+                                                        Click="History_Click" Tag="{Binding}" Margin="6,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        ToolTip="What this model actually ran at, session by session: the requests the app watched, and the gaps where it was away" />
+                                            </Grid>
                                             <TextBlock Text="{Binding Detail}" Style="{StaticResource Label}"
                                                        TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                            <TextBlock Text="{Binding Stats}" Style="{StaticResource Label}"
+                                                       Foreground="{DynamicResource TextFaint}"
+                                                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                                                       Visibility="{Binding Stats, Converter={x:Static cv:FilledToVisibility.Instance}}" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>

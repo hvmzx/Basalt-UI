@@ -263,9 +263,14 @@ internal static class WireTests
         UpdateChecker.Sources[1] = second;
 
         // ---- putting a release into a folder that only pretends to be basalt ----------------------------------------------
-        var realExe = new FileInfo(@"C:\Users\neur0\Documents\basalt\bin\basalt.exe");
-        realExe.Refresh();
-        var untouched = (realExe.Length, realExe.LastWriteTimeUtc);
+        // The folder the basalt this machine actually runs from. A real, updated install may carry a
+        // basalt.exe.previous from its last genuine update, so the thing to demand of the fake install is
+        // not "no .previous at all" but "nothing in this folder was added, removed, or touched."
+        var realRoot = @"C:\Users\neur0\Documents\basalt\bin";
+        static string Snapshot(string dir) => string.Join("\n",
+            new DirectoryInfo(dir).EnumerateFiles().OrderBy(f => f.Name)
+                .Select(f => $"{f.Name} {f.Length} {f.LastWriteTimeUtc:o}"));
+        var realBefore = Snapshot(realRoot);
 
         var fakeRoot = Path.Combine(scratch, "installroot");   // inside the scratch folder, which was wiped above
         Directory.CreateDirectory(Path.Combine(fakeRoot, "bin"));
@@ -305,11 +310,9 @@ internal static class WireTests
           mended is null && File.Exists(Path.Combine(fakeRoot, "README.md")) &&
           put.Exists(l => l.Contains("1 file laid in place")), string.Join(" | ", put));
 
-        realExe.Refresh();
         W("none of it went near the basalt this machine actually runs",
-          !File.Exists(@"C:\Users\neur0\Documents\basalt\bin\basalt.exe.previous") &&
-          (realExe.Length, realExe.LastWriteTimeUtc) == untouched,
-          $"the engine in use is {realExe.Length} bytes from {realExe.LastWriteTimeUtc:u}");
+          Snapshot(realRoot) == realBefore,
+          "the real install's folder changed: " + Snapshot(realRoot).Replace("\n", " | "));
 
         Console.WriteLine($"  {(fails == 0 ? "every wire check passed" : fails + " wire check(s) FAILED")}");
         Console.WriteLine($"  the fake install root was {fakeRoot}");
