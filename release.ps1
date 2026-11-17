@@ -8,7 +8,7 @@ param([ValidateSet('major', 'minor', 'patch')][string]$Part = 'patch')
 $ErrorActionPreference = "Stop"
 
 if (git status --porcelain) {
-    throw "the tree has uncommitted changes — commit them first"
+    throw "the tree has uncommitted changes - commit them first"
 }
 
 $latest = git tag --list 'v*' |
@@ -31,4 +31,4 @@ $branch = git rev-parse --abbrev-ref HEAD
 git push origin $branch
 git push origin $tag
 
-Write-Host "tagged $tag and pushed — the workflow builds the release."
+Write-Host "tagged $tag and pushed - the workflow builds the release."
