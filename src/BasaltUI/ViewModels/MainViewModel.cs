@@ -1567,6 +1567,64 @@ public sealed class MainViewModel : ObservableObject
                    Path.GetFileName(f.File).Equals(want, StringComparison.OrdinalIgnoreCase))?.File;
     }
 
+    // ---- named configs -----------------------------------------------------------------------------------------
+    /// <summary>Named configs, and which model wears which. The store keeps the names and the fields; the
+    /// config file's entries carry what wearing one means. Attach writes the fields in; detach keeps them.</summary>
+    public ConfigProfiles Profiles { get; } = new();
+
+    /// <summary>
+    /// Attach a named config to a model — or detach with null, which keeps the entry's fields and only
+    /// ends the link. Attaching rewrites the entry: every field the config defines, nothing else, the
+    /// model path untouched. A running server reads its config at start, so the fields land when it next
+    /// restarts; the words say that, because a row that looks the same but will behave differently
+    /// deserves a line.
+    /// </summary>
+    public void AttachProfile(HomeModelRow row, string? profile)
+    {
+        var doc = getConfig();
+        var entry = doc?.ModelEntries().FirstOrDefault(
+            e => SameModelFile(ConfigDocument.Text(e, "model"), row.Id));
+        if (doc is null || entry is null)
+        {
+            Append($"no config entry for {row.Id} — double-click the model and one is added", LogSource.Error);
+            return;
+        }
+        var file = Path.GetFileName(ConfigDocument.Text(entry, "model") ?? row.Id);
+
+        if (profile is null)
+        {
+            Profiles.Assign(file, null);
+            Append($"app: config detached from {file} — the entry keeps the fields it carries", LogSource.App);
+            return;
+        }
+        var fields = Profiles.Fields(profile);
+        if (fields is null)
+            return;
+
+        ConfigProfiles.Apply(entry, fields);
+        Profiles.Assign(file, profile);
+        try
+        {
+            doc.Save();
+            reopenConfig();
+        }
+        catch (Exception ex)
+        {
+            Append("could not save the config: " + ex.Message, LogSource.Error);
+            return;
+        }
+        Append($"app: config \"{profile}\" attached to {file} — its entry now carries the config's fields; " +
+               "a running server takes them on at its next start", LogSource.App);
+    }
+
+    /// <summary>A brand-new config, attached to the model that asked for it, ready to be shaped.</summary>
+    public string NewProfileFor(HomeModelRow row)
+    {
+        var name = Profiles.Create("config");
+        AttachProfile(row, name);
+        return name;
+    }
+
     // ---- the recorder's hand to the row and the window ----------------------------------------------------------
     /// <summary>
     /// The one number a model row can say about its past: the average decode speed of the session under way

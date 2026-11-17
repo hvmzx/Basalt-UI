@@ -41,6 +41,7 @@
         <TabControl Grid.Row="1" x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged" Margin="20,0,20,0">
             <TabItem Header="Basalt" />
             <TabItem Header="Models" />
+            <TabItem Header="Configs" />
             <TabItem Header="Server" />
             <TabItem Header="Engine defaults" />
             <TabItem Header="Raw JSON" />
@@ -283,6 +284,53 @@
                     </Border>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="ModelFields" />
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
+
+            <Grid x:Name="PageConfigs" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="260" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <DockPanel Grid.Column="0" Margin="0,16,0,16">
+                    <StackPanel DockPanel.Dock="Bottom">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Add" HorizontalAlignment="Stretch" Click="AddProfile_Click" />
+                            <Button Grid.Column="2" Content="Duplicate" HorizontalAlignment="Stretch" Click="DuplicateProfile_Click" />
+                        </Grid>
+                        <Button Content="Remove" Margin="0,8,0,0" HorizontalAlignment="Stretch" Click="RemoveProfile_Click" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="named configs" Style="{StaticResource Label}" Margin="0,0,0,8" />
+                    <ListBox x:Name="ProfilesList" SelectionChanged="ProfilesList_SelectionChanged" />
+                </DockPanel>
+
+                <DockPanel Grid.Column="2" Margin="0,16,0,16">
+                    <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                        <StackPanel>
+                            <DockPanel LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="name" Style="{StaticResource Label}"
+                                           VerticalAlignment="Center" Margin="0,0,10,0" />
+                                <TextBox x:Name="ProfileNameBox" Width="240" LostFocus="ProfileName_LostFocus" />
+                                <Button DockPanel.Dock="Right" Content="Add a field" Click="AddProfileField_Click" />
+                                <ComboBox DockPanel.Dock="Right" x:Name="AddProfileFieldCombo" Width="330"
+                                          Margin="0,0,8,0" />
+                            </DockPanel>
+                            <TextBlock DockPanel.Dock="Bottom" x:Name="ProfileAttached" Style="{StaticResource Label}"
+                                       Foreground="{DynamicResource TextFaint}" Margin="0,8,0,0"
+                                       TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Top" x:Name="ProfileHint" Style="{StaticResource Label}"
+                               Margin="0,0,0,8" TextWrapping="Wrap" />
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="ProfileFields" MaxWidth="780" HorizontalAlignment="Left" />
                     </ScrollViewer>
                 </DockPanel>
             </Grid>

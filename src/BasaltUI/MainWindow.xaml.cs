@@ -62,6 +62,7 @@ public partial class MainWindow : Window
         app.Downloads.ListChanged += RefreshDownloadsLink;
         app.Downloads.ItemChanged += _ => RefreshDownloadsLink();
         RefreshDownloadsLink();
+        ModelsList.ContextMenuOpening += ModelRowMenu_Opening;
 
         SetRequestsCollapsed(Vm.Settings.RecentRequestsCollapsed);
     }
@@ -379,24 +380,88 @@ public partial class MainWindow : Window
         new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
     }
 
-    /// <summary>Right-click on a model row: its config entry, in the Models tab of Settings, with the
-    /// entry selected and the load preview waiting underneath. The row's file is the entry's key.</summary>
-    private void EditModelEntry_Click(object sender, RoutedEventArgs e)
+    /// <summary>Right-click on a model row: its named config, or the entry itself. The menu is built
+    /// here, at open time, because its shape depends on the row: which config it wears, and whether a
+    /// file stands behind it at all.</summary>
+    private void ModelRowMenu_Opening(object sender, ContextMenuEventArgs e)
     {
-        e.Handled = true;
-        if (sender is not System.Windows.Controls.MenuItem { CommandParameter: HomeModelRow row })
+        var row = RowOfMenu(e.OriginalSource);
+        if (row is null)
+        {
+            ModelsList.ContextMenu = null;
             return;
-        ShowPage(Page.Settings);
-        SettingsPanel.RevealModel(row);
+        }
+        ModelsList.ContextMenu = ModelRowMenu(row);
+    }
+
+    private static HomeModelRow? RowOfMenu(object? source)
+    {
+        DependencyObject? d = source as DependencyObject;
+        while (d is not null)
+        {
+            if (d is FrameworkElement { DataContext: HomeModelRow row })
+                return row;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return null;
+    }
+
+    private ContextMenu ModelRowMenu(HomeModelRow row)
+    {
+        var menu = new ContextMenu();
+        var worn = Vm.Profiles.AssignedTo(row.Id);
+
+        if (worn is not null)
+        {
+            menu.Items.Add(Item($"Edit config “{worn}”…", () => { ShowPage(Page.Settings); SettingsPanel.RevealProfile(worn); },
+                                tip: "Every model wearing this config takes the change — that is what a named config is."));
+            menu.Items.Add(Item($"Detach “{worn}”", () => Vm.AttachProfile(row, null),
+                                tip: "The entry keeps the fields the config last wrote; only the link goes."));
+        }
+
+        var attach = new MenuItem
+        {
+            Header = worn is null ? "Attach a config…" : "Attach a different config…",
+            ToolTip = "The config's fields are written into this model's entry in the file",
+        };
+        foreach (var name in Vm.Profiles.Names.Where(n => !n.Equals(worn, StringComparison.OrdinalIgnoreCase)))
+            attach.Items.Add(Item(name, () => Vm.AttachProfile(row, name)));
+        if (worn is not null)
+            attach.Items.Add(Item("(no config)", () => Vm.AttachProfile(row, null)));
+        if (attach.Items.Count == 0)
+        {
+            attach.IsEnabled = false;
+            attach.ToolTip = "No configs yet — make one with “New config for this model…”";
+        }
+        attach.Items.Add(new Separator());
+        attach.Items.Add(Item("New config for this model…", () =>
+        {
+            var name = Vm.NewProfileFor(row);
+            ShowPage(Page.Settings);
+            SettingsPanel.RevealProfile(name);
+        }, tip: "A fresh, empty config, attached to this model at once, ready to be shaped"));
+        menu.Items.Add(attach);
+
+        if (worn is null)
+            menu.Items.Add(Item("Edit this entry's own fields…", () => { ShowPage(Page.Settings); SettingsPanel.RevealModel(row); },
+                                tip: "The Models tab of Settings, on this entry: gpu, kv, context, vision — with the load preview right below"));
+        menu.Items.Add(Item("Show in folder", () => ShowInFolder(row), row.HasFile,
+                            tip: "The file this row stands for, selected in the models folder"));
+        return menu;
+    }
+
+    private static MenuItem Item(string header, Action click, bool enabled = true, string? tip = null)
+    {
+        var item = new System.Windows.Controls.MenuItem
+        { Header = header, IsEnabled = enabled, ToolTip = tip };
+        item.Click += (_, _) => click();
+        return item;
     }
 
     /// <summary>Right-click on a model row that stands for a file: the folder with the file selected,
     /// the same place the config entry points at.</summary>
-    private void ShowModelFolder_Click(object sender, RoutedEventArgs e)
+    private void ShowInFolder(HomeModelRow row)
     {
-        e.Handled = true;
-        if (sender is not System.Windows.Controls.MenuItem { CommandParameter: HomeModelRow row })
-            return;
         var file = Vm.LocalFileOf(row);
         if (file is null || !File.Exists(file))
             return;

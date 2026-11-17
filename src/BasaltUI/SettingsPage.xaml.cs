@@ -475,6 +475,140 @@ public partial class SettingsPage : UserControl
             item.BringIntoView();
     }
 
+    // ---- the Configs tab -------------------------------------------------------------------------------------
+    // Named configs: sets of entry-level fields that models wear. The store keeps the names; wearing one
+    // is written into the model's entry in the file, so editing a config here re-writes every entry that
+    // wears it — the bake below runs on every edit while this tab is open, on leaving it, and on saving.
+    private string? profileName;
+
+    /// <summary>The Configs tab with one config selected — what a model row's right-click asks for.</summary>
+    public void RevealProfile(string name)
+    {
+        Tabs.SelectedIndex = 2;                         // the Configs tab
+        RebuildProfiles(name);
+        if (ProfilesList.ItemContainerGenerator.ContainerFromIndex(ProfilesList.SelectedIndex) is ListBoxItem item)
+            item.BringIntoView();
+    }
+
+    private void RebuildProfiles(string? keep = null)
+    {
+        rebuilding = true;
+        var want = keep ?? profileName;
+        ProfilesList.Items.Clear();
+        foreach (var n in app.Vm.Profiles.Names)
+            ProfilesList.Items.Add(n);
+        ProfilesList.SelectedIndex = want is null ? -1 : ProfilesList.Items.IndexOf(want);
+        rebuilding = false;
+        profileName = ProfilesList.SelectedItem as string;
+        ShowProfileFields();
+    }
+
+    private void ProfilesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (rebuilding)
+            return;
+        profileName = ProfilesList.SelectedItem as string;
+        ShowProfileFields();
+    }
+
+    private void ShowProfileFields()
+    {
+        ProfileFields.Children.Clear();
+        ProfileNameBox.Text = profileName ?? "";
+        ProfileNameBox.IsEnabled = profileName is not null;
+        var fields = profileName is null ? null : app.Vm.Profiles.Fields(profileName);
+        if (fields is null)
+        {
+            ProfileHint.Text = "No config selected. Attach one to a model from the main page's right-click, or add one here.";
+            ProfileAttached.Text = "";
+            AddProfileFieldCombo.IsEnabled = false;
+            return;
+        }
+        ProfileHint.Text = "The fields this config sets. A model wearing it carries exactly these in the file — nothing else.";
+        AddProfileFieldCombo.IsEnabled = true;
+        var wearing = app.Vm.Profiles.AttachedTo(profileName!);
+        ProfileAttached.Text = wearing.Count == 0
+            ? "no model wears this config yet — attach it from a model row's right-click"
+            : "worn by: " + string.Join(", ", wearing);
+        fields.Remove("model");     // a config sets every field but the one that says which model it is
+        BuildScopeFields(ProfileFields, fields, "entry",
+                         EntryCommon.Where(k => k != "model").ToArray(), AddProfileFieldCombo);
+    }
+
+    private void AddProfileField_Click(object sender, RoutedEventArgs e)
+    {
+        if (profileName is null)
+            return;
+        AddFromChooser(AddProfileFieldCombo, app.Vm.Profiles.Fields(profileName));
+    }
+
+    private void AddProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var name = app.Vm.Profiles.Create("config");
+        RebuildProfiles(name);
+    }
+
+    private void DuplicateProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (profileName is null)
+            return;
+        var source = app.Vm.Profiles.Fields(profileName)!;
+        var name = app.Vm.Profiles.Create(profileName + " copy");
+        var fields = app.Vm.Profiles.Fields(name)!;
+        foreach (var kv in source)
+            if (kv.Value is not null)
+                fields[kv.Key] = JsonNode.Parse(kv.Value.ToJsonString());
+        RebuildProfiles(name);
+    }
+
+    private void RemoveProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (profileName is null)
+            return;
+        var name = profileName;
+        profileName = null;
+        app.Vm.Profiles.Delete(name);       // assignments travel with it; the entries keep their fields
+        RebuildProfiles();
+    }
+
+    private void ProfileName_LostFocus(object sender, RoutedEventArgs e)
+    {
+        var name = ProfileNameBox.Text.Trim();
+        if (profileName is null || name.Length == 0 || name.Equals(profileName, StringComparison.Ordinal))
+        {
+            ProfileNameBox.Text = profileName ?? "";
+            return;
+        }
+        app.Vm.Profiles.Rename(profileName, name);   // the models wearing it keep wearing it, under the new name
+        profileName = null;
+        RebuildProfiles(name);
+    }
+
+    /// <summary>Every entry in the file that wears a config is made to carry it again — the bake that
+    /// keeps the file's word and the configs' word the same. The model path is never touched. True when
+    /// the bake changed an entry, so the dirty flag only speaks when there is something to save.</summary>
+    private bool BakeProfiles()
+    {
+        var changed = false;
+        foreach (var entry in doc.ModelEntries())
+        {
+            var file = Path.GetFileName(ConfigDocument.Text(entry, "model") ?? "");
+            if (app.Vm.Profiles.AssignedTo(file) is not { } worn ||
+                app.Vm.Profiles.Fields(worn) is not { } fields)
+                continue;
+            var before = entry.ToJsonString();
+            ConfigProfiles.Apply(entry, fields);
+            changed |= entry.ToJsonString() != before;
+        }
+        if (changed)
+            doc.MarkDirty();
+        return changed;
+    }
+
+    /// <summary>A profile edit is also a change to every entry wearing it: while this tab is open the
+    /// bake runs with the dirt, so "unsaved changes" always means the file already carries what is shown.</summary>
+    private bool OnConfigsTab => (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Configs";
+
     // ---- the load preview ------------------------------------------------------------------------------------
     private int previewRun;
 
@@ -1029,6 +1163,7 @@ public partial class SettingsPage : UserControl
         BuildScopeFields(EngineFields, doc.Engine, "engine", EngineCommon, AddEngineFieldCombo);
         ServerNote.Text = NoteForServer();
         BuildModelList();
+        RebuildProfiles();
         ShowIssues(doc.Validate(catalog));
     }
 
@@ -1092,9 +1227,19 @@ public partial class SettingsPage : UserControl
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // the tab strip is a hairline strip; the pages live beside it and this flips which one shows
+        var leaving = wasOnConfigs;
+        wasOnConfigs = OnConfigsTab;
         ShowTab();
         if (!ready)
             return;
+        if (leaving && !wasOnConfigs)
+        {
+            // a config edited while its tab was open has already been written into the entries wearing
+            // it, one bake per edit; this last one only catches up if the tab closed before the last
+            // keystroke committed — and the tabs being entered then show the entries as they now are
+            BakeProfiles();
+            RebuildCurrentPage();
+        }
         var raw = (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Raw JSON";
         if (!raw && RawBox.IsLoaded && !string.IsNullOrEmpty(RawBox.Text) && RawBox.Text != doc.ToJson())
         {
@@ -1107,14 +1252,17 @@ public partial class SettingsPage : UserControl
         UpdateDirty();
     }
 
+    private bool wasOnConfigs;
+
     private void ShowTab()
     {
         var index = Tabs.SelectedIndex;
         PageBasalt.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
         PageModels.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
-        PageServer.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
-        PageEngine.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
-        PageRaw.Visibility = index == 4 ? Visibility.Visible : Visibility.Collapsed;
+        PageConfigs.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+        PageServer.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+        PageEngine.Visibility = index == 4 ? Visibility.Visible : Visibility.Collapsed;
+        PageRaw.Visibility = index == 5 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---- saving --------------------------------------------------------------------------------------------
@@ -1134,6 +1282,7 @@ public partial class SettingsPage : UserControl
         CommitSettings();
         if (OnRawTab && RawBox.Text != doc.ToJson() && !ApplyRaw())
             return false;
+        BakeProfiles();     // the entries wearing a config carry it into what is saved, whatever tab this came from
 
         var errors = doc.Validate(catalog).Where(i => i.Error).ToList();
         if (errors.Count > 0 &&
@@ -1209,7 +1358,14 @@ public partial class SettingsPage : UserControl
         FootText.Text = "re-read from disk";
     }
 
-    private void UpdateDirty() => DirtyText.Text = doc.Dirty ? "unsaved changes" : "";
+    private void UpdateDirty()
+    {
+        // while the Configs tab is open, an edit to a config is also an edit to every entry wearing it:
+        // the bake runs right here, so the document the file will get already carries what is shown
+        if (ready && OnConfigsTab)
+            BakeProfiles();
+        DirtyText.Text = doc.Dirty ? "unsaved changes" : "";
+    }
 
     /// <summary>
     /// Leaving the page, the way the old close button used to: unsaved work gets one chance to be

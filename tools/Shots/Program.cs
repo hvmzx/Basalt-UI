@@ -141,7 +141,11 @@ internal static class Program
         var tabs = Field<System.Windows.Controls.TabControl>(settingsPanel, "Tabs");
         if (settingsPanel is not null && tabs is not null)
         {
-            tabs.SelectedIndex = 2;                     // Server
+            tabs.SelectedIndex = 2;                     // Configs, the named configs and their fields
+            WaitUntil(() => true, 0);
+            written += Shoot(settingsHost, Path.Combine(dir, "02a-settings-configs.png"), maps);
+
+            tabs.SelectedIndex = 3;                     // Server
             WaitUntil(() => true, 0);
             written += Shoot(settingsHost, Path.Combine(dir, "02b-settings-server.png"), maps,
                              ("fields", 40, 130, 920, 330));

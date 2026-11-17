@@ -338,21 +338,6 @@
                                     <DataTemplate>
                                         <StackPanel Margin="2,2">
                                             <Grid Tag="{Binding}">
-                                                <Grid.ContextMenu>
-                                                    <!-- the row's own say-so: the config entry behind this model,
-                                                         opened in the Models tab with this row selected -->
-                                                    <ContextMenu>
-                                                        <MenuItem Header="Edit this model's config…"
-                                                                  Click="EditModelEntry_Click"
-                                                                  CommandParameter="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
-                                                                  ToolTip="The Models tab of Settings, on this model's entry: gpu, kv, context, vision — with the load preview right below" />
-                                                        <MenuItem Header="Show in folder"
-                                                                  IsEnabled="{Binding HasFile}"
-                                                                  Click="ShowModelFolder_Click"
-                                                                  CommandParameter="{Binding PlacementTarget.Tag, RelativeSource={RelativeSource AncestorType={x:Type ContextMenu}}}"
-                                                                  ToolTip="The file this row stands for, selected in the models folder" />
-                                                    </ContextMenu>
-                                                </Grid.ContextMenu>
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
