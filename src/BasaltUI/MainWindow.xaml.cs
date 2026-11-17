@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
@@ -376,6 +377,35 @@ public partial class MainWindow : Window
         if (sender is not Button { Tag: HomeModelRow row })
             return;
         new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
+    }
+
+    /// <summary>Right-click on a model row: its config entry, in the Models tab of Settings, with the
+    /// entry selected and the load preview waiting underneath. The row's file is the entry's key.</summary>
+    private void EditModelEntry_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not System.Windows.Controls.MenuItem { CommandParameter: HomeModelRow row })
+            return;
+        ShowPage(Page.Settings);
+        SettingsPanel.RevealModel(row);
+    }
+
+    /// <summary>Right-click on a model row that stands for a file: the folder with the file selected,
+    /// the same place the config entry points at.</summary>
+    private void ShowModelFolder_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not System.Windows.Controls.MenuItem { CommandParameter: HomeModelRow row })
+            return;
+        var file = Vm.LocalFileOf(row);
+        if (file is null || !File.Exists(file))
+            return;
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"/select,\"{file}\"",
+            UseShellExecute = true,
+        });
     }
 
     private void SaveLog_Click(object sender, RoutedEventArgs e)

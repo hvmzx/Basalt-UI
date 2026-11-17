@@ -448,6 +448,33 @@ public partial class SettingsPage : UserControl
         _ = UpdateLoadPreview();
     }
 
+    /// <summary>
+    /// The Models tab with one model's entry selected — what the main page's right-click asks for. The
+    /// entry is matched by its file's name, the same word the row and the config both carry. A model the
+    /// config does not name has no entry to edit, and the page stays where it was.
+    /// </summary>
+    public void RevealModel(ViewModels.HomeModelRow row)
+    {
+        var want = Path.GetFileName(row.Id);
+        var index = -1;
+        var entries = doc.ModelEntries().ToList();
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var model = ConfigDocument.Text(entries[i], "model") ?? "";
+            if (Path.GetFileName(model).Equals(want, StringComparison.OrdinalIgnoreCase))
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index < 0)
+            return;
+        Tabs.SelectedIndex = 1;                         // the Models tab
+        ModelsList.SelectedIndex = index;               // the entry — SelectionChanged shows its fields
+        if (ModelsList.ItemContainerGenerator.ContainerFromIndex(index) is ListBoxItem item)
+            item.BringIntoView();
+    }
+
     // ---- the load preview ------------------------------------------------------------------------------------
     private int previewRun;
 

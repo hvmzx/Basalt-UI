@@ -1558,6 +1558,15 @@ public sealed class MainViewModel : ObservableObject
         MaybeProbeServed();      // the card's dedup asks the router what names it serves; answers may redraw it
     });
 
+    /// <summary>The file a model row stands for, when the models folder holds one by that name; the
+    /// models the server serves without a local file have no path to hand out.</summary>
+    public string? LocalFileOf(HomeModelRow row)
+    {
+        var want = Path.GetFileName(row.Id);
+        return localModels.FirstOrDefault(f =>
+                   Path.GetFileName(f.File).Equals(want, StringComparison.OrdinalIgnoreCase))?.File;
+    }
+
     // ---- the recorder's hand to the row and the window ----------------------------------------------------------
     /// <summary>
     /// The one number a model row can say about its past: the average decode speed of the session under way
@@ -1980,6 +1989,10 @@ public sealed record HomeModelRow(string Id, string Detail, bool Live, bool Load
     public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);
 
     public bool HasBadge => Badge is not null;
+
+    /// <summary>Whether the row stands for a file in the models folder: a file has a config entry to edit
+    /// and a folder to show; a model the server serves without one has neither.</summary>
+    public bool HasFile => !Live;
 }
 
 /// <summary>A model file sitting in the models folder, as the folder itself reports it.</summary>

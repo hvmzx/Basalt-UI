@@ -37,6 +37,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- the two families whose real marks are theirs to wear; everything else keeps its monogram tile -->
+    <Resource Include="Assets\qwen.png" />
+    <Resource Include="Assets\deepseek.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
   </ItemGroup>
 
