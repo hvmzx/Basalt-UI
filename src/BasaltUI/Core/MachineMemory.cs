@@ -123,6 +123,15 @@ public static class MachineMemory
 
     // ---- VRAM --------------------------------------------------------------------------------------------------
 
+    /// <summary>How much commit charge the machine still grants. A server that was terminated the hard way
+    /// leaves tens of GB of dirty pages for Windows to write out to the pagefile, and until that drains the
+    /// commit headroom stays starved — the next engine's first subprocess spawn can lose that race.</summary>
+    public static long CommitAvailable()
+    {
+        var status = new MemoryStatusEx();
+        return GlobalMemoryStatusEx(status) ? (long)status.AvailPageFile : 0;
+    }
+
     /// The GPU figure the UI shows: the card's own memory from DXGI, and what fills it from the very
     /// performance counter Task Manager samples for its "Dedicated GPU memory" row.
     ///

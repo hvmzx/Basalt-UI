@@ -1172,8 +1172,9 @@ public sealed class MainViewModel : ObservableObject
             if (attempt == 1)
             {
                 Append($"app: the engine exited (code {process.LastExitCode}) without serving — " +
-                       "waiting 15 s for it to settle and trying once more", LogSource.App);
-                await Task.Delay(TimeSpan.FromSeconds(15));
+                       $"commit headroom {MachineMemory.CommitAvailable() >> 30} GiB; waiting for the " +
+                       "machine to settle after the last server, then trying once more", LogSource.App);
+                await WaitForSettledAsync(TimeSpan.FromMinutes(4));
                 if (process.IsAlive)                        // something started meanwhile; leave it be
                     return true;
             }
@@ -1248,6 +1249,21 @@ public sealed class MainViewModel : ObservableObject
         {
             ApplyProfile(watched, null);
             ReapplyPolling();
+        }
+    }
+
+    /// <summary>The machine after a terminated server: its dirty pages drain to the pagefile for minutes,
+    /// and a spawn during that drain can fail on exhausted commit charge. This waits until the headroom is
+    /// comfortable again — or the limit runs out, and the retry is tried anyway.</summary>
+    private static async Task WaitForSettledAsync(TimeSpan limit)
+    {
+        const long enoughCommit = 8L << 30;                     // 8 GiB of headroom
+        var end = DateTime.UtcNow + limit;
+        while (DateTime.UtcNow < end)
+        {
+            if (MachineMemory.CommitAvailable() >= enoughCommit)
+                return;
+            await Task.Delay(2000);
         }
     }
 
