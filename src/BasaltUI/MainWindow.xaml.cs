@@ -410,45 +410,38 @@ public partial class MainWindow : Window
     {
         var menu = new ContextMenu();
         var worn = Vm.Profiles.AssignedTo(row.Id);
+        var active = Vm.Profiles.Active;
 
         if (worn is not null)
         {
             menu.Items.Add(Item($"Edit config “{worn}”…", () => { ShowPage(Page.Settings); SettingsPanel.RevealProfile(worn); },
-                                tip: "Every model wearing this config takes the change — that is what a named config is."));
+                                tip: "The Configs tab of Settings, on this config's whole document — its models, server and engine. Saving it rewrites the file when it is the active one."));
             menu.Items.Add(Item($"Detach “{worn}”", () => Vm.AttachProfile(row, null),
-                                tip: "The entry keeps the fields the config last wrote; only the link goes."));
+                                tip: "Only the link goes — the file is untouched."));
         }
 
         var attach = new MenuItem
         {
             Header = worn is null ? "Attach a config…" : "Attach a different config…",
-            ToolTip = "The config's fields are written into this model's entry in the file",
+            ToolTip = "Attaching applies it: the file is rewritten from the config's document, this model first in line",
         };
         foreach (var name in Vm.Profiles.Names.Where(n => !n.Equals(worn, StringComparison.OrdinalIgnoreCase)))
-            attach.Items.Add(Item(name, () => Vm.AttachProfile(row, name)));
+            attach.Items.Add(Item(name.Equals(active, StringComparison.OrdinalIgnoreCase)
+                                      ? "● " + name + "   (in the file now)"
+                                      : name, () => Vm.AttachProfile(row, name)));
         if (worn is not null)
             attach.Items.Add(Item("(no config)", () => Vm.AttachProfile(row, null)));
         if (attach.Items.Count == 0)
             attach.Items.Add(Item("(no configs yet)", () => { }, enabled: false,
-                                  "Make the first one with “Make a config from this entry…” below"));
+                                  "Make the first one with “New config for this model…” below"));
         attach.Items.Add(new Separator());
         attach.Items.Add(Item("New config for this model…", () =>
         {
             var name = Vm.NewProfileFor(row);
             ShowPage(Page.Settings);
             SettingsPanel.RevealProfile(name);
-        }, tip: "A fresh, empty config, attached to this model at once, ready to be shaped"));
+        }, tip: "Starts as the config the machine runs now, with this model first in line — a place to diverge from. Attaching is what applies it."));
         menu.Items.Add(attach);
-
-        menu.Items.Add(Item("Make a config from this entry…", () =>
-        {
-            var name = Vm.CaptureProfile(row);
-            if (name.Length > 0)
-            {
-                ShowPage(Page.Settings);
-                SettingsPanel.RevealProfile(name);
-            }
-        }, tip: "This entry's fields as they stand become a new named config, attached to this model — the way a default is made"));
 
         if (worn is null)
             menu.Items.Add(Item("Edit this entry's own fields…", () => { ShowPage(Page.Settings); SettingsPanel.RevealModel(row); },

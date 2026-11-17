@@ -311,28 +311,163 @@
                     <ListBox x:Name="ProfilesList" SelectionChanged="ProfilesList_SelectionChanged" />
                 </DockPanel>
 
-                <DockPanel Grid.Column="2" Margin="0,16,0,16">
-                    <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                <Grid Grid.Column="2" Margin="0,16,0,16">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
                         <StackPanel>
                             <DockPanel LastChildFill="False">
                                 <TextBlock DockPanel.Dock="Left" Text="name" Style="{StaticResource Label}"
                                            VerticalAlignment="Center" Margin="0,0,10,0" />
                                 <TextBox x:Name="ProfileNameBox" Width="240" LostFocus="ProfileName_LostFocus" />
-                                <Button DockPanel.Dock="Right" Content="Add a field" Click="AddProfileField_Click" />
-                                <ComboBox DockPanel.Dock="Right" x:Name="AddProfileFieldCombo" Width="330"
-                                          Margin="0,0,8,0" />
+                                <TextBlock DockPanel.Dock="Right" x:Name="ProfileState" Style="{StaticResource Label}"
+                                           VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap"
+                                           HorizontalAlignment="Right" />
                             </DockPanel>
-                            <TextBlock DockPanel.Dock="Bottom" x:Name="ProfileAttached" Style="{StaticResource Label}"
+                            <TextBlock x:Name="ProfileAttached" Style="{StaticResource Label}"
                                        Foreground="{DynamicResource TextFaint}" Margin="0,8,0,0"
                                        TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
-                    <TextBlock DockPanel.Dock="Top" x:Name="ProfileHint" Style="{StaticResource Label}"
-                               Margin="0,0,0,8" TextWrapping="Wrap" />
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel x:Name="ProfileFields" MaxWidth="780" HorizontalAlignment="Left" />
-                    </ScrollViewer>
-                </DockPanel>
+
+                    <!-- ============ the config's own sub-tabs, the same shape as the main ones ============ -->
+                    <TabControl Grid.Row="1" x:Name="ConfigTabs" SelectionChanged="ConfigTabs_SelectionChanged" Margin="0,0,0,0">
+                        <TabItem Header="Models" />
+                        <TabItem Header="Server" />
+                        <TabItem Header="Engine defaults" />
+                        <TabItem Header="Raw JSON" />
+                    </TabControl>
+
+                    <Grid Grid.Row="2" Margin="0,14,0,0">
+                        <Grid x:Name="ConfigPageModels" Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="225" />
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <DockPanel Grid.Column="0" Margin="0,0,0,0">
+                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="8" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0" Content="Add" HorizontalAlignment="Stretch" Click="AddModel_Click" />
+                                        <Button Grid.Column="2" Content="Duplicate" HorizontalAlignment="Stretch" Click="DuplicateModel_Click" />
+                                    </Grid>
+                                    <Button Content="Remove" Margin="0,8,0,0" HorizontalAlignment="Stretch" Click="RemoveModel_Click" />
+                                </StackPanel>
+                                <TextBlock DockPanel.Dock="Top" Text="models in this config" Style="{StaticResource Label}"
+                                           Margin="0,0,0,8" />
+                                <ListBox x:Name="ConfigModelsList" SelectionChanged="ConfigModelsList_SelectionChanged" />
+                            </DockPanel>
+
+                            <DockPanel Grid.Column="2" Margin="0,0,0,0">
+                                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left" Text="Add a field" Style="{StaticResource Label}"
+                                                   VerticalAlignment="Center" />
+                                        <Button DockPanel.Dock="Right" Content="Add to this model" Click="ConfigAddField_Click" />
+                                        <ComboBox x:Name="ConfigAddFieldCombo" DockPanel.Dock="Right" Width="330" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Border>
+                                <TextBlock DockPanel.Dock="Top" x:Name="ConfigModelHint" Style="{StaticResource Label}"
+                                           Margin="0,0,0,8" TextWrapping="Wrap" />
+                                <Border x:Name="ConfigPreviewCard" DockPanel.Dock="Bottom" Style="{StaticResource Card}"
+                                        Padding="16,12" Margin="0,10,0,0" Visibility="Collapsed">
+                                    <StackPanel>
+                                        <TextBlock DockPanel.Dock="Top"
+                                                   Text="load preview — how it would sit on this machine"
+                                                   Style="{StaticResource CardTitle}" />
+                                        <TextBlock x:Name="ConfigPreviewVerdict" Margin="0,6,0,0" TextWrapping="Wrap"
+                                                   FontWeight="SemiBold" />
+                                        <StackPanel x:Name="ConfigPreviewRows" Margin="0,8,0,0" />
+                                        <TextBlock x:Name="ConfigPreviewNote" Style="{StaticResource Label}"
+                                                   Foreground="{DynamicResource TextFaint}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Border>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="ConfigEntryFields" />
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Grid>
+
+                        <Grid x:Name="ConfigPageServer" Visibility="Collapsed">
+                            <DockPanel Margin="0,0,0,0">
+                                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left" x:Name="ConfigServerNote" Text="Address the server listens on."
+                                                   Style="{StaticResource Label}" TextWrapping="Wrap" MaxWidth="560" VerticalAlignment="Center" />
+                                        <Button DockPanel.Dock="Right" Content="Add" Click="ConfigAddServerField_Click" />
+                                        <ComboBox x:Name="ConfigAddServerFieldCombo" DockPanel.Dock="Right" Width="300" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Border>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="ConfigServerFields" MaxWidth="780" HorizontalAlignment="Left" />
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Grid>
+
+                        <Grid x:Name="ConfigPageEngine" Visibility="Collapsed">
+                            <DockPanel Margin="0,0,0,0">
+                                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="Defaults for every model in this config. A field set on a single model wins over the same field here."
+                                                   Style="{StaticResource Label}" TextWrapping="Wrap" MaxWidth="560" VerticalAlignment="Center" />
+                                        <Button DockPanel.Dock="Right" Content="Add" Click="ConfigAddEngineField_Click" />
+                                        <ComboBox x:Name="ConfigAddEngineFieldCombo" DockPanel.Dock="Right" Width="300" Margin="0,0,8,0" />
+                                    </DockPanel>
+                                </Border>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel x:Name="ConfigEngineFields" MaxWidth="780" HorizontalAlignment="Left" />
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Grid>
+
+                        <Grid x:Name="ConfigPageRaw" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,10">
+                                <Button DockPanel.Dock="Left" Content="Reformat" Click="ReformatConfig_Click" Margin="0,0,8,0" />
+                                <Button DockPanel.Dock="Left" Content="Check" Click="CheckConfig_Click" />
+                                <TextBlock DockPanel.Dock="Left" Style="{StaticResource Label}" VerticalAlignment="Center"
+                                           Margin="14,0,0,0"
+                                           Text="edits here are what Save keeps — unknown keys survive" />
+                                <Button DockPanel.Dock="Right" Content="Apply to the form" Click="ApplyConfigRaw_Click" />
+                            </DockPanel>
+
+                            <Border Grid.Row="1" Style="{StaticResource Card}" Padding="0">
+                                <TextBox x:Name="ConfigRawBox" Margin="0"
+                                         Background="Transparent" BorderThickness="0"
+                                         AcceptsReturn="True" AcceptsTab="True"
+                                         FontFamily="{StaticResource FontMono}" FontSize="12.5"
+                                         Padding="12,10"
+                                         TextWrapping="NoWrap"
+                                         VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                         VerticalContentAlignment="Stretch"
+                                         IsUndoEnabled="True" />
+                            </Border>
+
+                            <Border Grid.Row="2" Style="{StaticResource Card}" Margin="0,12,0,0" Padding="14,10">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="Problems" Style="{StaticResource CardTitle}" Margin="0,0,0,6" />
+                                    <ListBox x:Name="ConfigIssuesList" BorderThickness="0" Background="Transparent" />
+                                </DockPanel>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Grid>
             </Grid>
 
             <Grid x:Name="PageServer" Visibility="Collapsed">

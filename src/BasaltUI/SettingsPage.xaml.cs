@@ -33,11 +33,21 @@ public partial class SettingsPage : UserControl
 
     private readonly App app;
     private readonly SettingsCatalog catalog = SettingsCatalog.Shared;
-    private ConfigDocument doc = null!;
+    private ConfigDocument fileDoc = null!;      // the real file the engine reads
+    private ConfigDocument configDoc = null!;    // the selected named config, as a scratch document
+    private string? profileName;
     private JsonObject? entry;
     private bool ready;
     private bool rebuilding;
     private bool committing;
+    private bool wasOnConfigs;
+
+    /// <summary>
+    /// The document the fields are working on: the real file everywhere except the Configs tab, where it
+    /// is the selected config's own document — which is what lets every editor on this page shape a
+    /// named config with exactly the code that shapes the file.
+    /// </summary>
+    private ConfigDocument doc => OnConfigsTab ? configDoc : fileDoc;
 
     public SettingsPage()
     {
@@ -59,6 +69,9 @@ public partial class SettingsPage : UserControl
         foreach (var box in new[] { ConnectionsBox, MirrorBox, ProxyBox })
             box.LostFocus += (_, _) => CommitSettings();
 
+        mainPreview = new PreviewUI(PreviewCard, PreviewVerdict, PreviewRows, PreviewNote);
+        configPreview = new PreviewUI(ConfigPreviewCard, ConfigPreviewVerdict, ConfigPreviewRows, ConfigPreviewNote);
+
         OnShown();
     }
 
@@ -77,7 +90,9 @@ public partial class SettingsPage : UserControl
 
         ReadBasaltTab();
 
-        doc = OpenDoc(app.Settings.ConfigPath);
+        fileDoc = OpenDoc(app.Settings.ConfigPath);
+        if (OnConfigsTab)
+            LoadConfigDoc();
         RebuildEverything();
         ready = true;
     }
@@ -128,13 +143,10 @@ public partial class SettingsPage : UserControl
 
     private void RebuildEverything()
     {
-        PathText.Text = doc.FilePath;
-        BuildModelList();
-        BuildScopeFields(ServerFields, doc.Server, "server", ServerCommon, AddServerFieldCombo);
-        BuildScopeFields(EngineFields, doc.Engine, "engine", EngineCommon, AddEngineFieldCombo);
-        ServerNote.Text = NoteForServer();
-        ShowIssues(doc.Validate(catalog));
-        UpdateDirty();
+        PathText.Text = OnConfigsTab
+            ? $"config “{profileName ?? "?"}” — {ConfigProfiles.StorePath}"
+            : doc.FilePath;
+        RebuildCurrentPage();
     }
 
     private string NoteForServer() => ConfigDocument.ThisPcOnly(doc.Host)
@@ -269,8 +281,8 @@ public partial class SettingsPage : UserControl
 
             if (!string.Equals(previousConfig, S.ConfigPath, StringComparison.OrdinalIgnoreCase))
             {
-                doc = OpenDoc(S.ConfigPath);
-                doc.MarkDirty();
+                fileDoc = OpenDoc(S.ConfigPath);
+                fileDoc.MarkDirty();
                 app.UseConfigFile(S.ConfigPath);
                 RebuildEverything();
             }
@@ -353,7 +365,7 @@ public partial class SettingsPage : UserControl
                             MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
 
-        doc = ConfigDocument.Blank(dialog.FileName, GuessModelPath());
+        fileDoc = ConfigDocument.Blank(dialog.FileName, GuessModelPath());
         ConfigBox.Text = dialog.FileName;
         CommitSettings();
         RebuildEverything();
@@ -396,18 +408,26 @@ public partial class SettingsPage : UserControl
         return Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
     }
 
-    // ---- the Models tab -------------------------------------------------------------------------------------
+    // ---- the Models tab (and the config's own Models page, which share it) ------------------------------------
+    /// <summary>Whichever models list the visible page owns: the main tab's or the selected config's.</summary>
+    private ListBox EntryList => OnConfigsTab ? ConfigModelsList : ModelsList;
+
+    private (StackPanel Fields, TextBlock Hint, ComboBox Combo) EntryHosts => OnConfigsTab
+        ? (ConfigEntryFields, ConfigModelHint, ConfigAddFieldCombo)
+        : (ModelFields, ModelHint, AddFieldCombo);
+
     private void BuildModelList()
     {
         rebuilding = true;
-        var keep = ModelsList.SelectedIndex;
-        ModelsList.Items.Clear();
+        var list = EntryList;
+        var keep = list.SelectedIndex;
+        list.Items.Clear();
         foreach (var item in doc.ModelEntries())
-            ModelsList.Items.Add(LabelFor(item));
-        ModelsList.SelectedIndex = ModelsList.Items.Count == 0 ? -1 : Math.Clamp(keep, 0, ModelsList.Items.Count - 1);
+            list.Items.Add(LabelFor(item));
+        list.SelectedIndex = list.Items.Count == 0 ? -1 : Math.Clamp(keep, 0, list.Items.Count - 1);
         rebuilding = false;
 
-        entry = doc.ModelEntries().ElementAtOrDefault(ModelsList.SelectedIndex);
+        entry = doc.ModelEntries().ElementAtOrDefault(list.SelectedIndex);
         ShowEntryFields();
     }
 
@@ -424,27 +444,34 @@ public partial class SettingsPage : UserControl
     }
 
     private void ModelsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => EntrySelected(ModelsList);
+
+    private void ConfigModelsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        => EntrySelected(ConfigModelsList);
+
+    private void EntrySelected(ListBox list)
     {
         if (rebuilding)
             return;
-        entry = doc.ModelEntries().ElementAtOrDefault(ModelsList.SelectedIndex);
+        entry = doc.ModelEntries().ElementAtOrDefault(list.SelectedIndex);
         ShowEntryFields();
     }
 
     private void ShowEntryFields()
     {
+        var (fields, hint, combo) = EntryHosts;
         if (entry is null)
         {
-            ModelFields.Children.Clear();
-            ModelHint.Text = "Add a model to get started — the path to a .basalt or .gguf file is enough.";
-            AddFieldCombo.IsEnabled = false;
-            PreviewCard.Visibility = Visibility.Collapsed;
+            fields.Children.Clear();
+            hint.Text = "Add a model to get started — the path to a .basalt or .gguf file is enough.";
+            combo.IsEnabled = false;
+            Preview.Card.Visibility = Visibility.Collapsed;
             previewRun++;                       // a preview already on its way belongs to an entry that is gone
             return;
         }
-        ModelHint.Text = "Only what you set here goes into the file; anything you leave out keeps basalt's default.";
-        AddFieldCombo.IsEnabled = true;
-        BuildScopeFields(ModelFields, entry, "entry", EntryCommon, AddFieldCombo);
+        hint.Text = "Only what you set here goes into the file; anything you leave out keeps basalt's default.";
+        combo.IsEnabled = true;
+        BuildScopeFields(fields, entry, "entry", EntryCommon, combo);
         _ = UpdateLoadPreview();
     }
 
@@ -455,9 +482,10 @@ public partial class SettingsPage : UserControl
     /// </summary>
     public void RevealModel(ViewModels.HomeModelRow row)
     {
+        Tabs.SelectedIndex = 1;             // the Models tab — leaving the Configs tab persists its config first
         var want = Path.GetFileName(row.Id);
         var index = -1;
-        var entries = doc.ModelEntries().ToList();
+        var entries = fileDoc.ModelEntries().ToList();
         for (var i = 0; i < entries.Count; i++)
         {
             var model = ConfigDocument.Text(entries[i], "model") ?? "";
@@ -469,22 +497,20 @@ public partial class SettingsPage : UserControl
         }
         if (index < 0)
             return;
-        Tabs.SelectedIndex = 1;                         // the Models tab
-        ModelsList.SelectedIndex = index;               // the entry — SelectionChanged shows its fields
+        ModelsList.SelectedIndex = index;   // the entry — SelectionChanged shows its fields
         if (ModelsList.ItemContainerGenerator.ContainerFromIndex(index) is ListBoxItem item)
             item.BringIntoView();
     }
 
     // ---- the Configs tab -------------------------------------------------------------------------------------
-    // Named configs: sets of entry-level fields that models wear. The store keeps the names; wearing one
-    // is written into the model's entry in the file, so editing a config here re-writes every entry that
-    // wears it — the bake below runs on every edit while this tab is open, on leaving it, and on saving.
-    private string? profileName;
-
+    // Named configs are whole basalt config documents — their own models, server, engine, raw JSON — kept
+    // beside the file. One is the active one: the config file on disk currently carries its document.
+    // Editing here shapes the selected config's own document (the doc property points at it); saving
+    // keeps it in the store, and rewrites the file with it when it is the active one.
     /// <summary>The Configs tab with one config selected — what a model row's right-click asks for.</summary>
     public void RevealProfile(string name)
     {
-        Tabs.SelectedIndex = 2;                         // the Configs tab
+        Tabs.SelectedIndex = 2;             // the Configs tab — SelectionChanged loads the config's document
         RebuildProfiles(name);
         if (ProfilesList.ItemContainerGenerator.ContainerFromIndex(ProfilesList.SelectedIndex) is ListBoxItem item)
             item.BringIntoView();
@@ -499,52 +525,130 @@ public partial class SettingsPage : UserControl
             ProfilesList.Items.Add(n);
         ProfilesList.SelectedIndex = want is null ? -1 : ProfilesList.Items.IndexOf(want);
         rebuilding = false;
-        profileName = ProfilesList.SelectedItem as string;
-        ShowProfileFields();
+
+        var selected = ProfilesList.SelectedItem as string;
+        if (selected != profileName)
+        {
+            if (configDoc is not null && configDoc.Dirty)
+                PersistConfigDoc(apply: true);      // the one being left keeps what was typed into it
+            profileName = selected;
+            LoadConfigDoc();
+        }
+        ShowProfileState();
+        RebuildEverything();
     }
 
     private void ProfilesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (rebuilding)
             return;
+        if (configDoc is not null && configDoc.Dirty)
+            PersistConfigDoc(apply: true);
         profileName = ProfilesList.SelectedItem as string;
-        ShowProfileFields();
+        LoadConfigDoc();
+        ShowProfileState();
+        RebuildEverything();
     }
 
-    private void ShowProfileFields()
+    /// <summary>The selected config's document, as a scratch document the editors can work on.</summary>
+    private void LoadConfigDoc()
     {
-        ProfileFields.Children.Clear();
-        ProfileNameBox.Text = profileName ?? "";
-        ProfileNameBox.IsEnabled = profileName is not null;
-        var fields = profileName is null ? null : app.Vm.Profiles.Fields(profileName);
-        if (fields is null)
-        {
-            ProfileHint.Text = "No config selected. Attach one to a model from the main page's right-click, or add one here.";
-            ProfileAttached.Text = "";
-            AddProfileFieldCombo.IsEnabled = false;
-            return;
-        }
-        ProfileHint.Text = "The fields this config sets. A model wearing it carries exactly these in the file — nothing else.";
-        AddProfileFieldCombo.IsEnabled = true;
-        var wearing = app.Vm.Profiles.AttachedTo(profileName!);
-        ProfileAttached.Text = wearing.Count == 0
-            ? "no model wears this config yet — attach it from a model row's right-click"
-            : "worn by: " + string.Join(", ", wearing);
-        fields.Remove("model");     // a config sets every field but the one that says which model it is
-        BuildScopeFields(ProfileFields, fields, "entry",
-                         EntryCommon.Where(k => k != "model").ToArray(), AddProfileFieldCombo);
+        configDoc = profileName is { } name && app.Vm.Profiles.Document(name) is { } root
+            ? new ConfigDocument(fileDoc.FilePath, (JsonObject)root.DeepClone(), "")
+            : new ConfigDocument(fileDoc.FilePath, ConfigProfiles.BlankDoc(), "");
     }
 
-    private void AddProfileField_Click(object sender, RoutedEventArgs e)
+    /// <summary>What was typed into the config is kept in the store — and when the config is the active
+    /// one, the file is rewritten with it, because editing the active config is editing the file.</summary>
+    private void PersistConfigDoc(bool apply)
     {
         if (profileName is null)
             return;
-        AddFromChooser(AddProfileFieldCombo, app.Vm.Profiles.Fields(profileName));
+        var wasDirty = configDoc.Dirty;
+        app.Vm.Profiles.Update(profileName, configDoc.Root);
+        configDoc.MarkSaved();
+        if (!wasDirty)
+            return;
+        if (apply && app.Vm.Profiles.Active == profileName)
+        {
+            var error = app.Vm.ApplyProfile(profileName, null);
+            FootText.Text = error is null
+                ? $"config “{profileName}” kept in the store and written to the file"
+                : $"config “{profileName}” kept in the store, but the file refused it: {error}";
+        }
+        else
+            FootText.Text = $"config “{profileName}” kept in the store";
+    }
+
+    private bool SaveConfigDoc()
+    {
+        if (OnConfigRawTab && ConfigRawBox.Text != configDoc.ToJson() && !ApplyConfigRaw())
+            return false;
+        if (profileName is null)
+        {
+            FootText.Text = "no config is selected — pick one on the left, or add one";
+            return false;
+        }
+
+        var errors = configDoc.Validate(catalog).Where(i => i.Error).ToList();
+        if (errors.Count > 0 &&
+            MessageBox.Show(W,
+                            "basalt will probably refuse to start with this config:\n\n" +
+                            string.Join("\n", errors.Select(x => "· " + x.Where + " — " + x.Message)) +
+                            "\n\nKeep it anyway?",
+                            "Basalt UI", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            return false;
+
+        app.Vm.Profiles.Update(profileName, configDoc.Root);
+        configDoc.MarkSaved();
+        if (app.Vm.Profiles.Active == profileName)
+        {
+            var error = app.Vm.ApplyProfile(profileName, null);
+            if (error is not null)
+            {
+                MessageBox.Show(W, "The config is kept in the store, but the file could not take it:\n\n" + error,
+                                "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Error);
+                FootText.Text = "kept in the store; the file refused the change";
+                UpdateDirty();
+                return false;
+            }
+            FootText.Text = "saved · the file now carries this config";
+        }
+        else
+            FootText.Text = "saved · it goes into the file when a model attaches it";
+        UpdateDirty();
+        return true;
+    }
+
+    private void ShowProfileState()
+    {
+        ProfileNameBox.Text = profileName ?? "";
+        ProfileNameBox.IsEnabled = profileName is not null;
+        if (profileName is null)
+        {
+            ProfileState.Text = "";
+            ProfileAttached.Text = "no config selected — add one here, or make one from a model row's right-click";
+            return;
+        }
+        ProfileState.Text = app.Vm.Profiles.Active == profileName
+            ? "● active — the config file carries this one"
+            : "not in the file — a model attaching it applies it";
+        var wearing = app.Vm.Profiles.AttachedTo(profileName);
+        ProfileAttached.Text = wearing.Count == 0
+            ? "no model is assigned to it yet"
+            : "runs with: " + string.Join(", ", wearing);
     }
 
     private void AddProfile_Click(object sender, RoutedEventArgs e)
     {
-        var name = app.Vm.Profiles.Create("config");
+        // a config starts with the machine's own server and engine words and an empty models list —
+        // enough to grow into something the engine would start with
+        var seed = ConfigProfiles.BlankDoc();
+        if (fileDoc.Root["engine"] is JsonObject engine)
+            seed["engine"] = (JsonObject)engine.DeepClone();
+        if (fileDoc.Root["server"] is JsonObject server)
+            seed["server"] = (JsonObject)server.DeepClone();
+        var name = app.Vm.Profiles.Create("config", seed);
         RebuildProfiles(name);
     }
 
@@ -552,12 +656,7 @@ public partial class SettingsPage : UserControl
     {
         if (profileName is null)
             return;
-        var source = app.Vm.Profiles.Fields(profileName)!;
-        var name = app.Vm.Profiles.Create(profileName + " copy");
-        var fields = app.Vm.Profiles.Fields(name)!;
-        foreach (var kv in source)
-            if (kv.Value is not null)
-                fields[kv.Key] = JsonNode.Parse(kv.Value.ToJsonString());
+        var name = app.Vm.Profiles.Create(profileName + " copy", app.Vm.Profiles.Document(profileName));
         RebuildProfiles(name);
     }
 
@@ -566,8 +665,12 @@ public partial class SettingsPage : UserControl
         if (profileName is null)
             return;
         var name = profileName;
+        if (MessageBox.Show(W, $"Delete the config “{name}”?\n\nThe models that ran with it lose the link; " +
+                               "the config file is untouched.", "Basalt UI",
+                            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
         profileName = null;
-        app.Vm.Profiles.Delete(name);       // assignments travel with it; the entries keep their fields
+        app.Vm.Profiles.Delete(name);
         RebuildProfiles();
     }
 
@@ -579,38 +682,25 @@ public partial class SettingsPage : UserControl
             ProfileNameBox.Text = profileName ?? "";
             return;
         }
-        app.Vm.Profiles.Rename(profileName, name);   // the models wearing it keep wearing it, under the new name
-        profileName = null;
+        app.Vm.Profiles.Rename(profileName, name);   // the models running with it keep running with it
+        profileName = name;
         RebuildProfiles(name);
     }
 
-    /// <summary>Every entry in the file that wears a config is made to carry it again — the bake that
-    /// keeps the file's word and the configs' word the same. The model path is never touched. True when
-    /// the bake changed an entry, so the dirty flag only speaks when there is something to save.</summary>
-    private bool BakeProfiles()
-    {
-        var changed = false;
-        foreach (var entry in doc.ModelEntries())
-        {
-            var file = Path.GetFileName(ConfigDocument.Text(entry, "model") ?? "");
-            if (app.Vm.Profiles.AssignedTo(file) is not { } worn ||
-                app.Vm.Profiles.Fields(worn) is not { } fields)
-                continue;
-            var before = entry.ToJsonString();
-            ConfigProfiles.Apply(entry, fields);
-            changed |= entry.ToJsonString() != before;
-        }
-        if (changed)
-            doc.MarkDirty();
-        return changed;
-    }
-
-    /// <summary>A profile edit is also a change to every entry wearing it: while this tab is open the
-    /// bake runs with the dirt, so "unsaved changes" always means the file already carries what is shown.</summary>
+    /// <summary>True while the main tab strip sits on Configs: the doc property points at the selected
+    /// config's document, and saving means the store rather than the file.</summary>
     private bool OnConfigsTab => (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Configs";
 
     // ---- the load preview ------------------------------------------------------------------------------------
     private int previewRun;
+
+    /// <summary>One load-preview card: whichever page is visible owns the one being shown.</summary>
+    private sealed record PreviewUI(Border Card, TextBlock Verdict, StackPanel Rows, TextBlock Note);
+
+    private PreviewUI mainPreview = null!;
+    private PreviewUI configPreview = null!;
+
+    private PreviewUI Preview => OnConfigsTab ? configPreview : mainPreview;
 
     /// <summary>
     /// How the selected entry's model file would load on this machine. The measuring itself runs off the
@@ -624,7 +714,7 @@ public partial class SettingsPage : UserControl
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             if (run == previewRun)
-                PreviewCard.Visibility = Visibility.Collapsed;
+                Preview.Card.Visibility = Visibility.Collapsed;
             return;
         }
 
@@ -643,10 +733,10 @@ public partial class SettingsPage : UserControl
             {
                 if (run != previewRun)
                     return;
-                PreviewCard.Visibility = Visibility.Visible;
-                PreviewVerdict.Text = "could not read this file — " + ex.Message;
-                PreviewRows.Children.Clear();
-                PreviewNote.Text = "nothing here blocks anything: saving the config never waits for the preview.";
+                Preview.Card.Visibility = Visibility.Visible;
+                Preview.Verdict.Text = "could not read this file — " + ex.Message;
+                Preview.Rows.Children.Clear();
+                Preview.Note.Text = "nothing here blocks anything: saving the config never waits for the preview.";
             });
         }
     }
@@ -656,12 +746,12 @@ public partial class SettingsPage : UserControl
     {
         if (run != previewRun)
             return;
-        PreviewCard.Visibility = Visibility.Visible;
-        PreviewVerdict.Text = plan.Verdict;
-        PreviewRows.Children.Clear();
+        Preview.Card.Visibility = Visibility.Visible;
+        Preview.Verdict.Text = plan.Verdict;
+        Preview.Rows.Children.Clear();
         foreach (var (label, value) in plan.Rows)
-            PreviewRows.Children.Add(PreviewRow(label, value));
-        PreviewNote.Text = plan.Note;
+            Preview.Rows.Children.Add(PreviewRow(label, value));
+        Preview.Note.Text = plan.Note;
     }
 
     /// <summary>The entry's own kv, context, slots, vision and GPU, plus the engine's resident-experts switch.</summary>
@@ -717,7 +807,7 @@ public partial class SettingsPage : UserControl
         doc.Models.Add(created);
         doc.MarkDirty();
         BuildModelList();
-        ModelsList.SelectedIndex = ModelsList.Items.Count - 1;
+        EntryList.SelectedIndex = EntryList.Items.Count - 1;
         UpdateDirty();
     }
 
@@ -732,7 +822,7 @@ public partial class SettingsPage : UserControl
         doc.Models.Add(copy);
         doc.MarkDirty();
         BuildModelList();
-        ModelsList.SelectedIndex = ModelsList.Items.Count - 1;
+        EntryList.SelectedIndex = EntryList.Items.Count - 1;
         UpdateDirty();
     }
 
@@ -828,6 +918,10 @@ public partial class SettingsPage : UserControl
     private void AddField_Click(object sender, RoutedEventArgs e) => AddFromChooser(AddFieldCombo, entry);
     private void AddServerField_Click(object sender, RoutedEventArgs e) => AddFromChooser(AddServerFieldCombo, doc.Server);
     private void AddEngineField_Click(object sender, RoutedEventArgs e) => AddFromChooser(AddEngineFieldCombo, doc.Engine);
+
+    private void ConfigAddField_Click(object sender, RoutedEventArgs e) => AddFromChooser(ConfigAddFieldCombo, entry);
+    private void ConfigAddServerField_Click(object sender, RoutedEventArgs e) => AddFromChooser(ConfigAddServerFieldCombo, configDoc.Server);
+    private void ConfigAddEngineField_Click(object sender, RoutedEventArgs e) => AddFromChooser(ConfigAddEngineFieldCombo, configDoc.Engine);
 
     private void AddFromChooser(ComboBox chooser, JsonObject? block)
     {
@@ -1159,16 +1253,28 @@ public partial class SettingsPage : UserControl
     private void RebuildCurrentPage()
     {
         ShowEntryFields();
-        BuildScopeFields(ServerFields, doc.Server, "server", ServerCommon, AddServerFieldCombo);
-        BuildScopeFields(EngineFields, doc.Engine, "engine", EngineCommon, AddEngineFieldCombo);
-        ServerNote.Text = NoteForServer();
+        if (OnConfigsTab)
+        {
+            BuildScopeFields(ConfigServerFields, configDoc.Server, "server", ServerCommon, ConfigAddServerFieldCombo);
+            BuildScopeFields(ConfigEngineFields, configDoc.Engine, "engine", EngineCommon, ConfigAddEngineFieldCombo);
+            ConfigServerNote.Text = NoteForServer();
+            ShowIssues(ConfigIssuesList, configDoc.Validate(catalog));
+            ShowProfileState();
+        }
+        else
+        {
+            BuildScopeFields(ServerFields, fileDoc.Server, "server", ServerCommon, AddServerFieldCombo);
+            BuildScopeFields(EngineFields, fileDoc.Engine, "engine", EngineCommon, AddEngineFieldCombo);
+            ServerNote.Text = NoteForServer();
+            ShowIssues(IssuesList, fileDoc.Validate(catalog));
+        }
         BuildModelList();
-        RebuildProfiles();
-        ShowIssues(doc.Validate(catalog));
+        UpdateDirty();
     }
 
     // ---- raw JSON ------------------------------------------------------------------------------------------
     private bool OnRawTab => (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Raw JSON";
+    private bool OnConfigRawTab => (ConfigTabs.SelectedItem as TabItem)?.Header?.ToString() == "Raw JSON";
 
     private void ShowRaw() => Dispatcher.InvokeAsync(() =>
     {
@@ -1187,8 +1293,9 @@ public partial class SettingsPage : UserControl
             });
             if (node is not JsonObject obj)
                 throw new InvalidDataException("the file must contain one JSON object");
-            doc = new ConfigDocument(doc.FilePath, obj, doc.OriginalText);
-            doc.MarkDirty();
+            var fresh = new ConfigDocument(fileDoc.FilePath, obj, fileDoc.OriginalText);
+            fresh.MarkDirty();
+            fileDoc = fresh;
             RebuildEverything();
             return true;
         }
@@ -1204,14 +1311,52 @@ public partial class SettingsPage : UserControl
 
     private void Reformat_Click(object sender, RoutedEventArgs e) => ShowRaw();
 
-    private void Check_Click(object sender, RoutedEventArgs e) => ShowIssues(doc.Validate(catalog));
+    private void Check_Click(object sender, RoutedEventArgs e) => ShowIssues(IssuesList, doc.Validate(catalog));
 
-    private void ShowIssues(IEnumerable<ConfigDocument.Issue> issues)
+    // the config's own raw JSON: the same shape, pointed at the selected config's document
+    private void ShowConfigRaw() => Dispatcher.InvokeAsync(() =>
     {
-        IssuesList.Items.Clear();
+        ConfigRawBox.Text = configDoc.ToJson();
+        ConfigRawBox.CaretIndex = 0;
+    });
+
+    private bool ApplyConfigRaw()
+    {
+        try
+        {
+            var node = JsonNode.Parse(ConfigRawBox.Text, documentOptions: new System.Text.Json.JsonDocumentOptions
+            {
+                CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
+            if (node is not JsonObject obj)
+                throw new InvalidDataException("the config must contain one JSON object");
+            var fresh = new ConfigDocument(configDoc.FilePath, obj, configDoc.OriginalText);
+            fresh.MarkDirty();
+            configDoc = fresh;
+            RebuildCurrentPage();
+            return true;
+        }
+        catch (Exception e)
+        {
+            MessageBox.Show(W, "The JSON on that tab is not valid:\n\n" + e.Message,
+                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return false;
+        }
+    }
+
+    private void ApplyConfigRaw_Click(object sender, RoutedEventArgs e) => ApplyConfigRaw();
+
+    private void ReformatConfig_Click(object sender, RoutedEventArgs e) => ShowConfigRaw();
+
+    private void CheckConfig_Click(object sender, RoutedEventArgs e) => ShowIssues(ConfigIssuesList, configDoc.Validate(catalog));
+
+    private void ShowIssues(ListBox box, IEnumerable<ConfigDocument.Issue> issues)
+    {
+        box.Items.Clear();
         foreach (var issue in issues)
         {
-            IssuesList.Items.Add(new ListBoxItem
+            box.Items.Add(new ListBoxItem
             {
                 Content = new TextBlock
                 {
@@ -1224,6 +1369,32 @@ public partial class SettingsPage : UserControl
         }
     }
 
+    /// <summary>The config's own sub-tab strip: same hairline shape, same pages-beside-the-strip trick.</summary>
+    private void ConfigTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        ShowConfigTab();
+        if (!ready)
+            return;
+        var raw = OnConfigRawTab;
+        if (!raw && ConfigRawBox.IsLoaded && !string.IsNullOrEmpty(ConfigRawBox.Text) && ConfigRawBox.Text != configDoc.ToJson())
+        {
+            // whatever was typed becomes the config's document, so the form and the store cannot drift apart
+            if (!ApplyConfigRaw())
+                return;
+        }
+        if (raw)
+            ShowConfigRaw();
+    }
+
+    private void ShowConfigTab()
+    {
+        var index = ConfigTabs.SelectedIndex;
+        ConfigPageModels.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ConfigPageServer.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
+        ConfigPageEngine.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
+        ConfigPageRaw.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         // the tab strip is a hairline strip; the pages live beside it and this flips which one shows
@@ -1234,14 +1405,27 @@ public partial class SettingsPage : UserControl
             return;
         if (leaving && !wasOnConfigs)
         {
-            // a config edited while its tab was open has already been written into the entries wearing
-            // it, one bake per edit; this last one only catches up if the tab closed before the last
-            // keystroke committed — and the tabs being entered then show the entries as they now are
-            BakeProfiles();
-            RebuildCurrentPage();
+            // leaving the configs: what was typed into the config is kept in the store first — and when
+            // the config is the active one, the file was rewritten with it, so the file tabs re-read it
+            var applied = configDoc.Dirty && app.Vm.Profiles.Active == profileName;
+            if (configDoc.Dirty)
+                PersistConfigDoc(apply: true);
+            if (applied)
+                fileDoc = OpenDoc(S.ConfigPath);
+            RebuildCurrentPage();       // the tabs being entered show the document they edit, as it now is
+        }
+        else if (!leaving && wasOnConfigs)
+        {
+            if (profileName is null && app.Vm.Profiles.Names.Count > 0)
+                RebuildProfiles(app.Vm.Profiles.Names[0]);   // first visit: the first config is as good a place to start as any
+            else
+            {
+                LoadConfigDoc();        // entering the configs: the selected config's own document
+                RebuildEverything();
+            }
         }
         var raw = (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Raw JSON";
-        if (!raw && RawBox.IsLoaded && !string.IsNullOrEmpty(RawBox.Text) && RawBox.Text != doc.ToJson())
+        if (!raw && RawBox.IsLoaded && !string.IsNullOrEmpty(RawBox.Text) && RawBox.Text != fileDoc.ToJson())
         {
             // whatever they typed becomes the document, so the form and the file cannot drift apart
             if (!ApplyRaw())
@@ -1251,8 +1435,6 @@ public partial class SettingsPage : UserControl
             ShowRaw();
         UpdateDirty();
     }
-
-    private bool wasOnConfigs;
 
     private void ShowTab()
     {
@@ -1280,9 +1462,10 @@ public partial class SettingsPage : UserControl
     private bool TrySave()
     {
         CommitSettings();
+        if (OnConfigsTab)
+            return SaveConfigDoc();
         if (OnRawTab && RawBox.Text != doc.ToJson() && !ApplyRaw())
             return false;
-        BakeProfiles();     // the entries wearing a config carry it into what is saved, whatever tab this came from
 
         var errors = doc.Validate(catalog).Where(i => i.Error).ToList();
         if (errors.Count > 0 &&
@@ -1341,17 +1524,28 @@ public partial class SettingsPage : UserControl
 
     private void Revert_Click(object sender, RoutedEventArgs e)
     {
-        if (!File.Exists(doc.FilePath))
+        if (OnConfigsTab)
+        {
+            if (configDoc.Dirty &&
+                MessageBox.Show(W, "Discard the changes to this config and re-read it from the store?",
+                                "Basalt UI", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                return;
+            LoadConfigDoc();
+            RebuildCurrentPage();
+            FootText.Text = "re-read from the store";
+            return;
+        }
+        if (!File.Exists(fileDoc.FilePath))
         {
             MessageBox.Show(W, "There is nothing on disk to go back to; this file has not been saved yet.",
                             "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        if (doc.Dirty &&
+        if (fileDoc.Dirty &&
             MessageBox.Show(W, "Discard the changes on this page and re-read the file?", "Basalt UI",
                             MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
             return;
-        doc = ConfigDocument.Load(doc.FilePath);
+        fileDoc = ConfigDocument.Load(fileDoc.FilePath);
         RebuildEverything();
         if (OnRawTab)
             ShowRaw();
@@ -1360,11 +1554,9 @@ public partial class SettingsPage : UserControl
 
     private void UpdateDirty()
     {
-        // while the Configs tab is open, an edit to a config is also an edit to every entry wearing it:
-        // the bake runs right here, so the document the file will get already carries what is shown
-        if (ready && OnConfigsTab)
-            BakeProfiles();
-        DirtyText.Text = doc.Dirty ? "unsaved changes" : "";
+        DirtyText.Text = OnConfigsTab
+            ? (configDoc.Dirty ? $"config “{profileName}” unsaved" : "")
+            : fileDoc.Dirty ? "unsaved changes" : "";
     }
 
     /// <summary>
@@ -1376,6 +1568,22 @@ public partial class SettingsPage : UserControl
     {
         if (ready)
             CommitSettings();
+        if (OnConfigsTab && configDoc.Dirty)
+        {
+            var keep = MessageBox.Show(W,
+                $"The config “{profileName}” has unsaved changes.\n\n" +
+                "Keep it before going back? It goes into the store, and into the config file if it is the active one.",
+                "Basalt UI", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+            if (keep == MessageBoxResult.Cancel)
+                return false;
+            if (keep == MessageBoxResult.Yes)
+            {
+                if (!SaveConfigDoc())
+                    return false;
+            }
+            else
+                PersistConfigDoc(apply: false);
+        }
         if (!doc.Dirty)
             return true;
 

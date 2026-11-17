@@ -1568,88 +1568,141 @@ public sealed class MainViewModel : ObservableObject
     }
 
     // ---- named configs -----------------------------------------------------------------------------------------
-    /// <summary>Named configs, and which model wears which. The store keeps the names and the fields; the
-    /// config file's entries carry what wearing one means. Attach writes the fields in; detach keeps them.</summary>
+    /// <summary>
+    /// Named configs: whole basalt config documents — their own models, server, engine, raw JSON — kept
+    /// beside the file the engine reads. Attaching one to a model applies it; the store remembers which
+    /// model runs with which, and which one the file currently carries.
+    /// </summary>
     public ConfigProfiles Profiles { get; } = new();
 
+    /// <summary>The model file the row's entry in the real config stands for — the name the store keys
+    /// assignments with. Null when the file has no entry for the row's model.</summary>
+    private string? FileOfRow(HomeModelRow row)
+    {
+        var entry = getConfig()?.ModelEntries().FirstOrDefault(
+            e => SameModelFile(ConfigDocument.Text(e, "model"), row.Id));
+        return entry is null ? null : Path.GetFileName(ConfigDocument.Text(entry, "model") ?? row.Id);
+    }
+
     /// <summary>
-    /// Attach a named config to a model — or detach with null, which keeps the entry's fields and only
-    /// ends the link. Attaching rewrites the entry: every field the config defines, nothing else, the
-    /// model path untouched. A running server reads its config at start, so the fields land when it next
-    /// restarts; the words say that, because a row that looks the same but will behave differently
-    /// deserves a line.
+    /// Attach a named config to a model — which means apply it. The config's whole document (its models,
+    /// its server, its engine) is written into the real config file now, with this model's entry first
+    /// in line, and the config is remembered as the one this model runs with. A config that does not
+    /// carry this model gains it, keeping the entry the file has for it. Detaching (null) only ends the
+    /// link — the file is untouched. A running server reads its config at start, so it takes the new
+    /// document the next time it starts.
     /// </summary>
     public void AttachProfile(HomeModelRow row, string? profile)
     {
-        var doc = getConfig();
-        var entry = doc?.ModelEntries().FirstOrDefault(
-            e => SameModelFile(ConfigDocument.Text(e, "model"), row.Id));
-        if (doc is null || entry is null)
-        {
-            Append($"no config entry for {row.Id} — double-click the model and one is added", LogSource.Error);
-            return;
-        }
-        var file = Path.GetFileName(ConfigDocument.Text(entry, "model") ?? row.Id);
-
         if (profile is null)
         {
+            if (FileOfRow(row) is not { } file)
+            {
+                Append($"no config entry for {row.Id} — double-click the model and one is added", LogSource.Error);
+                return;
+            }
             Profiles.Assign(file, null);
-            Append($"app: config detached from {file} — the entry keeps the fields it carries", LogSource.App);
+            Append($"app: config detached from {file} — only the link went; the file still carries what it carries", LogSource.App);
             return;
         }
-        var fields = Profiles.Fields(profile);
-        if (fields is null)
-            return;
 
-        ConfigProfiles.Apply(entry, fields);
-        Profiles.Assign(file, profile);
+        var error = ApplyProfile(profile, row.Id);
+        if (error is not null)
+        {
+            Append("could not apply the config: " + error, LogSource.Error);
+            return;
+        }
+        Append($"app: config \"{profile}\" applied — the file now carries its models, server and engine, " +
+               "and a running server takes it on at its next start", LogSource.App);
+    }
+
+    /// <summary>Writes a named config's document into the real config file, with the model named by
+    /// <paramref name="frontFile"/> first in line, and remembers it as the active one. Returns the error,
+    /// or null when it worked. The editor's Save uses this too, with no model to front.</summary>
+    public string? ApplyProfile(string name, string? frontFile)
+    {
+        var source = Profiles.Document(name);
+        if (source is null)
+            return $"no config named \"{name}\"";
+        var cfg = getConfig();
+        if (cfg is null)
+            return "no config file is set — pick one in Settings";
+
+        var root = (JsonObject)source.DeepClone();
+        var fronted = FrontModel(root, frontFile, cfg);
+        var fresh = new ConfigDocument(cfg.FilePath, root, cfg.OriginalText);
         try
         {
-            doc.Save();
-            reopenConfig();
+            fresh.Save();
         }
         catch (Exception ex)
         {
-            Append("could not save the config: " + ex.Message, LogSource.Error);
-            return;
+            return ex.Message;
         }
-        Append($"app: config \"{profile}\" attached to {file} — its entry now carries the config's fields; " +
-               "a running server takes them on at its next start", LogSource.App);
+
+        Profiles.Active = name;
+        if (fronted is { } file)
+            Profiles.Assign(file, name);
+        reopenConfig();                                     // the app re-reads what was just written
+        return null;
     }
 
-    /// <summary>A brand-new config, attached to the model that asked for it, ready to be shaped.</summary>
+    /// <summary>Makes the model named by <paramref name="frontFile"/> the first entry of
+    /// <paramref name="root"/>, adding it when the config does not carry it — the entry it keeps is the
+    /// one the current file has for it. Returns the fronted entry's model file name, or null.</summary>
+    private string? FrontModel(JsonObject root, string? frontFile, ConfigDocument current)
+    {
+        if (frontFile is null)
+            return null;
+        var want = Path.GetFileName(frontFile);
+        var models = root["models"] as JsonArray;
+        if (models is null)
+        {
+            models = [];
+            root["models"] = models;
+        }
+
+        JsonObject? found = null;
+        foreach (var node in models)
+            if (node is JsonObject o && SameModelFile(ConfigDocument.Text(o, "model"), want))
+            {
+                found = o;
+                break;
+            }
+
+        if (found is null)
+        {
+            // the config does not carry this model: it joins, with the entry the file has for it
+            found = current.ModelEntries()
+                           .Where(e => SameModelFile(ConfigDocument.Text(e, "model"), want))
+                           .Select(e => (JsonObject)e.DeepClone())
+                           .FirstOrDefault()
+                           ?? new JsonObject { ["model"] = LocalFileOf(want) ?? want.Replace('\\', '/') };
+            models.Insert(0, found);
+        }
+        else if (models[0] != found)
+        {
+            models.Remove(found);                           // first in line is what the engine preloads
+            models.Insert(0, found);
+        }
+        return Path.GetFileName(ConfigDocument.Text(found, "model") ?? want);
+    }
+
+    /// <summary>The models folder's path for a file name, when it holds one.</summary>
+    private string? LocalFileOf(string file)
+        => localModels.FirstOrDefault(f =>
+               Path.GetFileName(f.File).Equals(file, StringComparison.OrdinalIgnoreCase))?.File;
+
+    /// <summary>A new config that starts as the file the machine runs now, with the model that asked for
+    /// it first in line — a place to diverge from, not a blank page. Nothing is written to the file:
+    /// attaching the config is what does that.</summary>
     public string NewProfileFor(HomeModelRow row)
     {
-        var name = Profiles.Create("config");
-        AttachProfile(row, name);
-        return name;
-    }
-
-    /// <summary>
-    /// The entry's fields as they stand become a new named config, attached to the model that asked —
-    /// the way a default is made: the config that is already working gets a name, and every other model
-    /// can wear it from its row. The model path and the alias stay the entry's own; everything else the
-    /// entry carries goes into the config.
-    /// </summary>
-    public string CaptureProfile(HomeModelRow row)
-    {
-        var doc = getConfig();
-        var entry = doc?.ModelEntries().FirstOrDefault(
-            e => SameModelFile(ConfigDocument.Text(e, "model"), row.Id));
-        if (doc is null || entry is null)
-        {
-            Append($"no config entry for {row.Id} — double-click the model and one is added", LogSource.Error);
-            return "";
-        }
-        var name = Profiles.Create("default");
-        var fields = Profiles.Fields(name)!;
-        foreach (var kv in entry)
-            if (kv.Value is not null &&
-                !kv.Key.Equals("model", StringComparison.OrdinalIgnoreCase) &&
-                !kv.Key.Equals("alias", StringComparison.OrdinalIgnoreCase))
-                fields[kv.Key] = JsonNode.Parse(kv.Value.ToJsonString());
-        Profiles.Save();
-        AttachProfile(row, name);
+        var cfg = getConfig();
+        var seed = cfg is null ? ConfigProfiles.BlankDoc() : (JsonObject)cfg.Root.DeepClone();
+        var name = Profiles.Create("config", seed);
+        if (FileOfRow(row) is { } file)
+            Profiles.Assign(file, name);
         return name;
     }
 
