@@ -92,6 +92,34 @@ public static class UpdateChecker
         throw new IOException("no answer about newer releases — " + string.Join(" | ", attempts));
     }
 
+    /// <summary>Every published release, newest first — the changelog between two versions is the notes
+    /// of the releases in between, so the popup can show the whole story rather than just the last one.</summary>
+    public static async Task<IReadOnlyList<BasaltRelease>> ReleasesAsync(CancellationToken ct)
+    {
+        var path = "https://api.github.com/repos/" + Repo + "/releases?per_page=30";
+        var attempts = new List<string>();
+        foreach (var mirror in new[] { "", "https://gh-proxy.com/" })
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var root = await Net.GetJsonAsync(mirror + path, ct).ConfigureAwait(false);
+                if (root is not JsonArray list)
+                    throw new InvalidDataException("the releases API did not return a list");
+                return [.. list.OfType<JsonObject>().Select(Parse).Where(r => r.Tag.Length > 0)];
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                attempts.Add((mirror.Length == 0 ? "github.com" : "gh-proxy.com") + ": " + e.Message);
+            }
+        }
+        throw new IOException("no answer about releases — " + string.Join(" | ", attempts));
+    }
+
     internal static BasaltRelease Parse(JsonObject o)
     {
         var assets = new List<UpdateAsset>();

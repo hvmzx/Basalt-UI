@@ -50,11 +50,7 @@
         <!-- ============ the tabs ============ -->
         <TabControl Grid.Row="1" x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged" Margin="20,0,20,0">
             <TabItem Header="Basalt" />
-            <TabItem Header="Models" />
             <TabItem Header="Configs" />
-            <TabItem Header="Server" />
-            <TabItem Header="Engine" />
-            <TabItem Header="Raw JSON" />
         </TabControl>
 
         <!-- ============ the tab pages, kept out of the TabControl so the tab strip stays a hairline strip ============ -->
@@ -76,19 +72,6 @@
                             <Button Grid.Column="2" Content="Browse…" Click="BrowseExe_Click" />
                         </Grid>
 
-                        <Grid Margin="0,10,0,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="config file" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                            <TextBox x:Name="ConfigBox" Grid.Column="1" Margin="0,0,10,0" />
-                            <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                <Button Content="Browse…" Margin="0,0,8,0" Click="BrowseConfig_Click" />
-                                <Button Content="New…" Click="NewConfig_Click" />
-                            </StackPanel>
-                        </Grid>
 
                         <Grid Margin="0,10,0,2">
                             <Grid.ColumnDefinitions>
@@ -101,46 +84,10 @@
                             <Button Grid.Column="2" Content="Browse…" Click="BrowseModels_Click" />
                         </Grid>
 
-                        <Grid Margin="0,14,0,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="extra arguments" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                            <TextBox x:Name="ExtraBox" Grid.Column="1" />
-                        </Grid>
-
-                        <Grid Margin="0,10,0,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="180" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="api key" Style="{StaticResource Label}" VerticalAlignment="Center" />
-                            <PasswordBox x:Name="KeyBox" Grid.Column="1" />
-                        </Grid>
-                        <TextBlock Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
-                                   Margin="0,6,0,0" TextWrapping="Wrap"
-                                   Text="basalt refuses an api key inside the config file, so it lives here and is passed as --api-key. Leave it empty on a machine you trust." />
-
-                        <Border Style="{StaticResource Card}" Margin="0,16,0,0" Padding="16,12">
-                            <StackPanel>
-                                <DockPanel LastChildFill="False">
-                                    <TextBlock DockPanel.Dock="Left" Text="Command line" Style="{StaticResource CardTitle}" />
-                                    <Button DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
-                                            Content="Copy" Click="CopyCommandLine_Click" />
-                                </DockPanel>
-                                <TextBlock x:Name="PreviewText" Style="{StaticResource Mono}" Margin="0,8,0,0"
-                                           TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" />
-                                <TextBlock Text="basalt always starts as: serve --config &lt;file&gt;. Anything else the engine takes can go in extra arguments above."
-                                           Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
-                                           Margin="0,8,0,0" TextWrapping="Wrap" />
-                            </StackPanel>
-                        </Border>
-
                         <TextBlock Text="STARTUP AND TRAY" Style="{StaticResource Label}" FontSize="11"
                                    Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,22,0,8" />
                         <CheckBox x:Name="AutostartCheck" Content="Start Basalt UI when Windows starts" Margin="0,4" />
-                        <CheckBox x:Name="StartOnLaunchCheck" Content="Start basalt as soon as Basalt UI opens" Margin="0,4" />
+                        <CheckBox x:Name="StartOnLaunchCheck" Content="Start my configs when Basalt UI opens" Margin="0,4" />
                         <CheckBox x:Name="StartMinimisedCheck" Content="Open hidden in the tray" Margin="0,4" />
                         <CheckBox x:Name="TrayOnCloseCheck" Content="Close button hides to the tray instead of quitting" Margin="0,4" />
                         <CheckBox x:Name="StopOnExitCheck" Content="Stop basalt when Basalt UI quits" Margin="0,4" />
@@ -171,23 +118,6 @@
                                        VerticalAlignment="Center"
                                        Text="How often to ask /health and /metrics; charts update every second read." />
                         </Grid>
-
-                        <TextBlock Text="A NEWER BASALT" Style="{StaticResource Label}" FontSize="11"
-                                   Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,22,0,8" />
-                        <CheckBox x:Name="CheckUpdatesCheck" Content="Ask GitHub whether a newer basalt is out" Margin="0,4" />
-                        <TextBlock x:Name="UpdateFoot" Style="{StaticResource Label}" Margin="0,6,0,0"
-                                   TextWrapping="Wrap" />
-                        <DockPanel Margin="0,6,0,0" LastChildFill="False">
-                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal">
-                                <Button x:Name="CheckNowButton" Content="Check now" Click="CheckNow_Click" />
-                                <Button x:Name="BringBackButton" Content="Ask about it again" Click="BringBack_Click"
-                                        Margin="8,0,0,0" Visibility="Collapsed" />
-                            </StackPanel>
-                            <TextBlock DockPanel.Dock="Right" x:Name="DismissFoot" Style="{StaticResource Label}"
-                                       VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="380" />
-                        </DockPanel>
-                        <TextBlock x:Name="UpdateProblemText" Style="{StaticResource Label}" Margin="0,6,0,0"
-                                   TextWrapping="Wrap" Foreground="{DynamicResource Warn}" />
 
                         <TextBlock Text="DOWNLOADS" Style="{StaticResource Label}" FontSize="11"
                                    Foreground="{DynamicResource TextFaint}" FontWeight="SemiBold" Margin="0,22,0,8" />
@@ -230,6 +160,8 @@
 
                         <DockPanel Margin="0,18,0,0">
                             <Button Content="Open settings folder" Click="OpenAppFolder_Click" HorizontalAlignment="Left" />
+                            <Button Content="Export configuration…" Click="ExportConfiguration_Click" Margin="10,0,0,0"
+                                    HorizontalAlignment="Left" />
                             <TextBlock Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
                                        Margin="12,0,0,0" TextWrapping="Wrap"
                                        VerticalAlignment="Center"
@@ -368,16 +300,46 @@
 
                     <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
                         <StackPanel>
-                            <DockPanel LastChildFill="False">
-                                <TextBlock DockPanel.Dock="Right" x:Name="ProfileState" Style="{StaticResource Label}"
-                                           VerticalAlignment="Center" TextWrapping="Wrap" HorizontalAlignment="Right" />
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="config file" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                <TextBox x:Name="ProfileFileBox" Grid.Column="1" Margin="0,0,8,0"
+                                         LostFocus="ProfileFile_LostFocus" />
+                                <Button Grid.Column="2" Content="Browse…" Click="ProfileBrowse_Click" Margin="0,0,8,0" />
+                                <TextBlock Grid.Column="3" x:Name="ProfileState" Style="{StaticResource Label}"
+                                           VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </Grid>
+                            <Grid Margin="0,3,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="16" />
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="api key" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                <PasswordBox x:Name="ProfileKeyBox" Grid.Column="1" Margin="0,0,8,0"
+                                             LostFocus="ProfileKey_LostFocus" />
+                                <TextBlock Text="extra args" Grid.Column="3" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                <TextBox x:Name="ProfileArgsBox" Grid.Column="4" LostFocus="ProfileArgs_LostFocus" />
+                            </Grid>
+                            <DockPanel Margin="0,8,0,0" LastChildFill="False">
+                                <CheckBox x:Name="ProfileStartCheck" Content="Start this config when Basalt UI opens"
+                                          Checked="ProfileStart_Changed" Unchecked="ProfileStart_Changed" />
+                                <TextBlock DockPanel.Dock="Right" x:Name="ProfileCommand" Style="{StaticResource Mono}"
+                                           Foreground="{DynamicResource TextFaint}" TextTrimming="CharacterEllipsis"
+                                           ToolTip="The command this config is launched with" />
                             </DockPanel>
                             <TextBlock x:Name="ProfileAttached" Style="{StaticResource Label}"
                                        Foreground="{DynamicResource TextFaint}" Margin="0,8,0,0"
                                        TextWrapping="Wrap" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Border>
-
                     <!-- ============ the config's own sub-tabs, the same shape as the main ones ============ -->
                     <TabControl Grid.Row="1" x:Name="ConfigTabs" SelectionChanged="ConfigTabs_SelectionChanged" Margin="0,0,0,0">
                         <TabItem Header="Models" />

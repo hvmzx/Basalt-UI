@@ -173,8 +173,10 @@ public partial class App : Application
         // port from a terminal, or from an app window that was closed to the tray long ago.
         _ = FirstBeatAsync();
 
-        if (Settings.StartServerOnLaunch && !Server.IsAlive)
-            _ = Vm.StartAsync();
+        // Each config carries its own start-on-launch wish: apply its document to its own file and start
+        // it as its own basalt. Several can run together, each on the port its document names.
+        if (Settings.StartConfigsOnLaunch)
+            _ = Vm.StartFlaggedConfigsAsync();
 
         Poller.Start(Math.Clamp(Settings.PollMs, 250, 60_000));
     }
@@ -339,7 +341,7 @@ public partial class App : Application
     {
         try
         {
-            await Server.StopAsync(Math.Clamp(Settings.StopGraceSeconds, 5, 600));
+            await Vm.StopAllConfigsAsync();      // every config this app started, not just the watched one
         }
         catch (Exception ex)
         {

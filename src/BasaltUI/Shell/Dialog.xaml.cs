@@ -12,6 +12,7 @@ namespace BasaltUI.Shell;
 public partial class Dialog : Window
 {
     private bool confirmed;
+    private Action? details;
 
     private Dialog(Window owner, string title, string message, string confirm, string cancel)
     {
@@ -46,6 +47,19 @@ public partial class Dialog : Window
         return box.confirmed && box.ChoiceBox.SelectedItem is string pick ? pick : null;
     }
 
+    /// <summary>A question with a third button whose action shows more context without ending the question —
+    /// the update popup's "view changelog", for instance. The details button stays available.</summary>
+    public static bool ConfirmWithDetails(Window? owner, string title, string message,
+                                          string confirm, string cancel, string details, Action onDetails)
+    {
+        var box = new Dialog(OwnerOr(owner), title, message, confirm, cancel);
+        box.DetailsButton.Content = details;
+        box.DetailsButton.Visibility = Visibility.Visible;
+        box.details = onDetails;
+        box.ShowDialog();
+        return box.confirmed;
+    }
+
     /// <summary>One button, one fact.</summary>
     public static void Info(Window? owner, string title, string message)
     {
@@ -65,6 +79,8 @@ public partial class Dialog : Window
         confirmed = true;
         Close();
     }
+
+    private void Details_Click(object sender, RoutedEventArgs e) => details?.Invoke();
 
     private void Cancel_Click(object sender, RoutedEventArgs e) => Close();
 }

@@ -35,6 +35,14 @@ public partial class ReleaseNotesPage : UserControl
         Render(release.Notes);
     }
 
+    /// <summary>The same renderer over assembled changelog text — used by the update popup's details window.</summary>
+    public void ShowText(string title, string markdown)
+    {
+        ReleaseTitle.Text = title;
+        GitHubButton.Visibility = Visibility.Collapsed;
+        Render(markdown);
+    }
+
     private void GitHub_Click(object sender, RoutedEventArgs e) => app?.Vm.OpenReleasePage();
 
     // ---- the little markdown renderer ---------------------------------------------------------------------

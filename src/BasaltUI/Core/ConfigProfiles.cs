@@ -15,9 +15,21 @@ namespace BasaltUI.Core;
 /// </summary>
 public sealed class ConfigProfiles
 {
-    private readonly List<(string Name, JsonObject Doc)> configs = [];
+    private readonly List<Config> configs = [];
     private readonly Dictionary<string, string> assigned = new(StringComparer.OrdinalIgnoreCase);
     private string? active;
+
+    /// <summary>Everything a named config owns: the plain engine document, plus the app's own words about
+    /// how it is launched. None of these app fields ever go into the engine's config file.</summary>
+    public sealed class Config
+    {
+        public required string Name { get; set; }
+        public required JsonObject Doc { get; set; }
+        public string FilePath { get; set; } = "";
+        public string ApiKey { get; set; } = "";
+        public string ExtraArgs { get; set; } = "";
+        public bool StartOnLaunch { get; set; }
+    }
 
     public ConfigProfiles() => Load();
 
@@ -28,11 +40,44 @@ public sealed class ConfigProfiles
 
     /// <summary>The config's whole document — the live object, so an editor can change it in place and
     /// call <see cref="Update"/> after. Null when no config wears the name.</summary>
-    public JsonObject? Document(string name)
-        => configs.FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase)).Doc;
+    public JsonObject? Document(string name) => Of(name)?.Doc;
 
-    public bool Exists(string name)
-        => configs.Any(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+    private Config? Of(string name)
+        => configs.FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+    public bool Exists(string name) => Of(name) is not null;
+
+    /// <summary>The file this config is written into and passed to basalt on the command line.</summary>
+    public string? FilePath(string name) => Of(name)?.FilePath;
+
+    public string ApiKey(string name) => Of(name)?.ApiKey ?? "";
+
+    public string ExtraArgs(string name) => Of(name)?.ExtraArgs ?? "";
+
+    public bool StartsOnLaunch(string name) => Of(name)?.StartOnLaunch == true;
+
+    public void SetLaunch(string name, string? file = null, string? apiKey = null,
+                          string? extraArgs = null, bool? startOnLaunch = null)
+    {
+        if (Of(name) is not { } config)
+            return;
+        if (file is not null)
+            config.FilePath = file.Trim();
+        if (apiKey is not null)
+            config.ApiKey = apiKey.Trim();
+        if (extraArgs is not null)
+            config.ExtraArgs = extraArgs.Trim();
+        if (startOnLaunch is not null)
+            config.StartOnLaunch = startOnLaunch.Value;
+        Save();
+    }
+
+    /// <summary>A sensible file for a new config: its own name in the app's configs folder.</summary>
+    public static string DefaultFileFor(string name)
+    {
+        var safe = string.Concat(name.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '-'));
+        return Path.Combine(AppPaths.ConfigsDir, safe + ".json");
+    }
 
     /// <summary>A starting point for a config that has nothing yet: the shape basalt reads.</summary>
     public static JsonObject BlankDoc() => new()
@@ -50,7 +95,12 @@ public sealed class ConfigProfiles
         var name = baseName;
         for (var i = 2; Exists(name); i++)
             name = $"{baseName} {i}";
-        configs.Add((name, seed is null ? BlankDoc() : (JsonObject)seed.DeepClone()));
+        configs.Add(new Config
+        {
+            Name = name,
+            Doc = seed is null ? BlankDoc() : (JsonObject)seed.DeepClone(),
+            FilePath = DefaultFileFor(name),
+        });
         Save();
         return name;
     }
@@ -62,7 +112,7 @@ public sealed class ConfigProfiles
         var at = configs.FindIndex(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (at < 0)
             return;
-        configs[at] = (configs[at].Name, (JsonObject)root.DeepClone());
+        configs[at].Doc = (JsonObject)root.DeepClone();
         Save();
     }
 
@@ -83,7 +133,7 @@ public sealed class ConfigProfiles
         var at = configs.FindIndex(c => c.Name.Equals(old, StringComparison.OrdinalIgnoreCase));
         if (at < 0 || name.Length == 0 || Exists(name) && !name.Equals(old, StringComparison.OrdinalIgnoreCase))
             return;
-        configs[at] = (name, configs[at].Doc);
+        configs[at].Name = name;
         foreach (var key in assigned.Where(kv => kv.Value.Equals(old, StringComparison.OrdinalIgnoreCase))
                                      .Select(kv => kv.Key)
                                      .ToList())
@@ -139,7 +189,15 @@ public sealed class ConfigProfiles
                 var document = c.Get("doc");
                 if (name.Length == 0 || document is not { ValueKind: JsonValueKind.Object })
                     continue;
-                configs.Add((name, JsonNode.Parse(document.Value.GetRawText()) as JsonObject ?? BlankDoc()));
+                configs.Add(new Config
+                {
+                    Name = name,
+                    Doc = JsonNode.Parse(document.Value.GetRawText()) as JsonObject ?? BlankDoc(),
+                    FilePath = c.Get("file").S(),
+                    ApiKey = c.Get("apiKey").S(),
+                    ExtraArgs = c.Get("extraArgs").S(),
+                    StartOnLaunch = c.Get("startOnLaunch").B(),
+                });
             }
             foreach (var a in root.Get("assigned").Arr())
             {
@@ -160,35 +218,39 @@ public sealed class ConfigProfiles
         }
     }
 
+    /// <summary>The whole store as JSON — the export writes this beside the app's settings.</summary>
+    public JsonObject ToJson()
+    {
+        var list = new JsonArray();
+        foreach (var c in configs)
+            list.Add(new JsonObject
+            {
+                ["name"] = c.Name,
+                ["doc"] = JsonNode.Parse(c.Doc.ToJsonString()),
+                ["file"] = c.FilePath,
+                ["apiKey"] = c.ApiKey,
+                ["extraArgs"] = c.ExtraArgs,
+                ["startOnLaunch"] = c.StartOnLaunch,
+            });
+        var worn = new JsonArray();
+        foreach (var kv in assigned)
+            worn.Add(new JsonObject { ["file"] = kv.Key, ["config"] = kv.Value });
+        return new JsonObject
+        {
+            ["version"] = 3,
+            ["active"] = active,
+            ["configs"] = list,
+            ["assigned"] = worn,
+        };
+    }
+
     public void Save()
     {
-        JsonNode snapshot;
-        lock (gate)
-        {
-            var list = new JsonArray();
-            foreach (var (name, document) in configs)
-                list.Add(new JsonObject
-                {
-                    ["name"] = name,
-                    ["doc"] = JsonNode.Parse(document.ToJsonString()),
-                });
-            var worn = new JsonArray();
-            foreach (var kv in assigned)
-                worn.Add(new JsonObject { ["file"] = kv.Key, ["config"] = kv.Value });
-            snapshot = new JsonObject
-            {
-                ["version"] = 2,
-                ["active"] = active,
-                ["configs"] = list,
-                ["assigned"] = worn,
-            };
-        }
-
         try
         {
             AppPaths.Ensure();
             var tmp = StorePath + ".tmp";
-            File.WriteAllText(tmp, snapshot.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            File.WriteAllText(tmp, ToJson().ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             File.Move(tmp, StorePath, overwrite: true);
         }
         catch (Exception e)

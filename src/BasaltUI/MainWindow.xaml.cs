@@ -270,38 +270,51 @@ public partial class MainWindow : Window
     // ---- the version dot ---------------------------------------------------------------------------------------
     private async void UpdateDot_Click(object sender, RoutedEventArgs e)
     {
-        // Green: the click is a manual check. Yellow: the click is the update itself.
+        // Green: the click is a manual check. Yellow: the click opens the update question.
         if (Vm.UpdateAvailable)
-        {
-            Update_Click(sender, e);
-            return;
-        }
-        await Vm.CheckForUpdateAsync(manual: true);
+            await AskUpdateAsync();
+        else
+            await Vm.CheckForUpdateAsync(manual: true);
     }
 
     // ---- a newer basalt ----------------------------------------------------------------------------------------
-    private async void Update_Click(object sender, RoutedEventArgs e)
-    {
-        // Whether a server has to be stopped, and whose it is, decides the wording. The plan is looked
-        // at again inside the update itself; this pass is only for putting the question honestly.
-        var plan = Vm.PeekUpdatePlan();
-        var tag = Vm.Latest?.Tag ?? "the new version";
+    private async void Update_Click(object sender, RoutedEventArgs e) => await AskUpdateAsync();
 
-        if (plan.Blocked)
+    /// <summary>One small question: from which version to which, what will be replaced, and a changelog
+    /// button that shows every release in between without closing the question. A yes installs at once.</summary>
+    private async Task AskUpdateAsync()
+    {
+        var latest = Vm.Latest;
+        if (latest is null)
         {
-            Shell.Dialog.Info(this, "Update basalt", plan.Question(tag));
+            await Vm.CheckForUpdateAsync(manual: true);
+            return;
+        }
+        if (!Vm.UpdateAvailable)
+        {
+            Shell.Dialog.Info(this, "No newer basalt", $"This machine has {Vm.InstalledVersionText}.");
             return;
         }
 
-        if (plan.Answers)
+        // Whether a server has to be stopped, and whose it is, decides what the question says. The plan is
+        // looked at again inside the update itself; this pass is only for putting it honestly.
+        var plan = Vm.PeekUpdatePlan();
+        if (plan.Blocked)
         {
-            var what = plan.AskFirst
-                ? $"The server answering on port {plan.Port} (pid {plan.Pid}) was not started by Basalt UI, and Windows cannot replace its files while it runs.\n\n" +
-                  $"Basalt will be asked to stop politely (the Ctrl+C it listens for), {tag} will be put in place, and then you choose whether to start it again from here.\n\nContinue?"
-                : $"Basalt is going to be terminated so {tag} can be installed: the server stops, the new files go in, and then you choose whether to start it again.\n\nContinue?";
-            if (!Shell.Dialog.Confirm(this, "Update basalt", what))
-                return;
+            Shell.Dialog.Info(this, "Update basalt", plan.Question(latest.Tag));
+            return;
         }
+
+        var from = Vm.InstalledVersionText;
+        var what = plan.Answers
+            ? plan.Question(latest.Tag)
+            : "Nothing is answering on the port, so the files go straight in.";
+        var message = $"Update basalt from {from} to {latest.Tag}?\n\n{Vm.UpdateAssetText}\n\n{what}";
+        var changelogTitle = $"Changes from {from} to {latest.Tag}";
+        if (!Shell.Dialog.ConfirmWithDetails(this, "A newer basalt", message,
+                                             $"Update to {latest.Tag}", "Not now", "View changelog",
+                                             () => _ = ChangelogWindow.ShowAsync(this, app, changelogTitle)))
+            return;
 
         UpdateButton.IsEnabled = false;
         DismissButton.IsEnabled = false;
@@ -321,15 +334,14 @@ public partial class MainWindow : Window
             DismissButton.IsEnabled = true;
         }
 
-        // The update is done and the server, if there was one, is off. Starting again is the user's call.
         if (wasRunning)
         {
-            if (Shell.Dialog.Confirm(this, "Update installed", $"{tag} is installed. Start basalt again now?",
+            if (Shell.Dialog.Confirm(this, "Update installed", $"{latest.Tag} is installed. Start basalt again now?",
                                      confirm: "Start again", cancel: "Not now"))
                 _ = Vm.StartAsync();
         }
         else
-            app.Notify($"{tag} is installed — press Start when you want it running");
+            app.Notify($"{latest.Tag} is installed — press Start when you want it running");
     }
 
     /// <summary>The notes, as a page over the dashboard; the GitHub page stays reachable from inside it.</summary>
@@ -443,9 +455,6 @@ public partial class MainWindow : Window
         }, tip: "Starts as the config the machine runs now, with this model first in line — a place to diverge from. Attaching is what applies it."));
         menu.Items.Add(attach);
 
-        if (worn is null)
-            menu.Items.Add(Item("Edit this entry's own fields…", () => { ShowPage(Page.Settings); SettingsPanel.RevealModel(row); },
-                                tip: "The Models tab of Settings, on this entry: gpu, kv, context, vision — with the load preview right below"));
         menu.Items.Add(Item("Show in folder", () => ShowInFolder(row), row.HasFile,
                             tip: "The file this row stands for, selected in the models folder"));
         return menu;

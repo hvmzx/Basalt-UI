@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Windows;
 using System.Windows.Input;
@@ -658,6 +659,24 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>The release already named in the log, so it is announced once and not once per check.</summary>
     private string announcedTag = "";
 
+    /// <summary>The notes of every release newer than the one installed here, oldest first — what the
+    /// update popup's changelog button shows when the user asks what "X to Y" actually means.</summary>
+    public async Task<string> ChangelogAsync()
+    {
+        var releases = await UpdateChecker.ReleasesAsync(CancellationToken.None);
+        var between = releases
+            .Where(r => r.Version is not null && UpdateChecker.Compare(InstalledVersionText, r) > 0)
+            .OrderBy(r => r.Version)
+            .ToList();
+        var text = $"# Changes from {InstalledVersionText} to {Latest?.Tag ?? "newest"}\n\n";
+        foreach (var r in between)
+            text += $"## {r.Tag} — {(r.PublishedAt.Length >= 10 ? r.PublishedAt[..10] : r.PublishedAt)}\n\n" +
+                    (string.IsNullOrWhiteSpace(r.Notes) ? "(no notes were written for this release)" : r.Notes) + "\n\n";
+        if (between.Count == 0)
+            text += "(no release notes were published between these versions)\n";
+        return text;
+    }
+
     /// <summary>
     /// The quiet check. Once soon after the app starts, and then every few hours it stays open, so a release
     /// published overnight is sitting there when the window is. A manual check always works, even with the
@@ -919,7 +938,16 @@ public sealed class MainViewModel : ObservableObject
     }
 
     // ---- actions ---------------------------------------------------------------------------------------
-    public string EffectiveApiKey => Settings.ApiKey;
+    /// <summary>The api key belongs to the active config: it is passed on that config's command line and
+    /// sent as the bearer key when polling its server. Older settings with no active config still work.</summary>
+    public string EffectiveApiKey => Profiles.Active is { } name
+        ? Profiles.ApiKey(name)
+        : Settings.ApiKey;
+
+    /// <summary>The file the active config is written into, and the one the app polls.</summary>
+    public string ActiveConfigFile => Profiles.Active is { } name
+        ? Profiles.FilePath(name) ?? Settings.ConfigPath
+        : Settings.ConfigPath;
 
     /// <summary>The address and key to poll, straight from the config file the app points at.</summary>
     public void ReapplyPolling()
@@ -927,7 +955,8 @@ public sealed class MainViewModel : ObservableObject
         var cfg = getConfig();
         var port = cfg?.Port ?? 8080;
         var host = cfg?.Host ?? "127.0.0.1";
-        poller.Configure(port, host, string.IsNullOrWhiteSpace(Settings.ApiKey) ? null : Settings.ApiKey,
+        var key = EffectiveApiKey;
+        poller.Configure(port, host, string.IsNullOrWhiteSpace(key) ? null : key,
                          readServerLog: !process.StartedByUs);
         process.ServePort = port;                                  // how a stop finds the server's own processes
         Raise(nameof(Url));
@@ -949,6 +978,84 @@ public sealed class MainViewModel : ObservableObject
         return ok;
     }
 
+    /// <summary>The configs started alongside the one this window watches: one process each, on its own
+    /// file and port, so several basalts can run at once without fighting over a config or a socket.</summary>
+    private readonly Dictionary<string, BasaltProcess> otherServers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>At launch, apply and start every config that asked for it. The active one is started
+    /// through this window's own server; the others get their own processes and write to the log.</summary>
+    public async Task StartFlaggedConfigsAsync()
+    {
+        if (!Settings.StartConfigsOnLaunch)
+            return;
+        foreach (var name in Profiles.Names.Where(Profiles.StartsOnLaunch).ToList())
+        {
+            var error = ApplyProfile(name, null);
+            if (error is not null)
+            {
+                Append($"app: config \"{name}\" did not start — {error}", LogSource.Error);
+                continue;
+            }
+            if (name == Profiles.Active)
+            {
+                if (!process.IsAlive)
+                    await StartAsync();
+                continue;
+            }
+
+            var target = Profiles.FilePath(name)!;
+            var server = Profiles.Document(name)?["server"] as JsonObject;
+            var port = server is not null && int.TryParse(ConfigDocument.Text(server, "port"), out var p) ? p : 8080;
+            var spec = new LaunchSpec
+            {
+                ExePath = Settings.BasaltExePath,
+                ConfigPath = target,
+                ApiKey = Profiles.ApiKey(name),
+                ExtraArgs = Profiles.ExtraArgs(name),
+                Port = port,
+            };
+            var extra = new BasaltProcess();
+            extra.ConsoleLine += line => Append($"[{name}] {line}", LogSource.Server);
+            extra.Notice += note => Append($"[{name}] {note}", LogSource.App);
+            if (extra.Start(spec))
+            {
+                otherServers[name] = extra;
+                Append($"app: started config \"{name}\" on port {port} — {Path.GetFileName(target)}", LogSource.App);
+            }
+            else
+                Append($"app: config \"{name}\" could not start", LogSource.Error);
+        }
+    }
+
+    /// <summary>Everything that makes this installation this installation: the app's own settings, and
+    /// every named config — its document, its file, its launch words and its model assignments.</summary>
+    public string ExportConfiguration()
+    {
+        var root = new JsonObject
+        {
+            ["exportedAt"] = DateTime.UtcNow.ToString("O"),
+            ["basaltUiSettings"] = JsonNode.Parse(JsonSerializer.Serialize(Settings)),
+            ["configs"] = Profiles.ToJson(),
+        };
+        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>Every basalt this app started, including the one the window watches, gets a clean stop.</summary>
+    public async Task StopAllConfigsAsync()
+    {
+        foreach (var (name, extra) in otherServers.ToList())
+        {
+            if (extra.IsAlive)
+            {
+                Append($"app: stopping config \"{name}\"", LogSource.App);
+                await extra.StopAsync(Settings.StopGraceSeconds);
+            }
+            otherServers.Remove(name);
+        }
+        if (process.IsAlive)
+            await process.StopAsync(Settings.StopGraceSeconds);
+    }
+
     /// <summary>Checks the paths and api-key rules, and hands back the launch spec. Shows what is wrong.</summary>
     private bool PrepareStart(out LaunchSpec spec)
     {
@@ -960,14 +1067,16 @@ public sealed class MainViewModel : ObservableObject
             Notice?.Invoke("Set the path to basalt.exe in Settings → Paths.");
             return false;
         }
-        if (string.IsNullOrWhiteSpace(Settings.ConfigPath) || !File.Exists(Settings.ConfigPath))
+        var configFile = ActiveConfigFile;
+        if (string.IsNullOrWhiteSpace(configFile) || !File.Exists(configFile))
         {
-            Notice?.Invoke("Set the config file in Settings → Paths; basalt needs one to serve several models.");
+            Notice?.Invoke("Set a config file in the Configs tab; basalt needs one to serve several models.");
             return false;
         }
+        var apiKey = EffectiveApiKey;
         if (cfg is not null && cfg.KeyWouldBeRefused)
         {
-            Notice?.Invoke("Remove api-key from the config file: basalt refuses it there. Put it in Settings → Paths.");
+            Notice?.Invoke("Remove api-key from the config file: basalt refuses it there. Put it in the config's launch options.");
             return false;
         }
         if (cfg is not null)
@@ -997,9 +1106,9 @@ public sealed class MainViewModel : ObservableObject
         spec = new LaunchSpec
         {
             ExePath = Settings.BasaltExePath,
-            ConfigPath = Settings.ConfigPath,
-            ExtraArgs = Settings.ExtraArgs,
-            ApiKey = Settings.ApiKey,
+            ConfigPath = configFile,
+            ExtraArgs = Profiles.Active is { } active ? Profiles.ExtraArgs(active) : Settings.ExtraArgs,
+            ApiKey = apiKey,
             Port = cfg?.Port ?? 8080,
         };
         return true;
@@ -1630,7 +1739,10 @@ public sealed class MainViewModel : ObservableObject
 
         var root = (JsonObject)source.DeepClone();
         var fronted = FrontModel(root, frontFile, cfg);
-        var fresh = new ConfigDocument(cfg.FilePath, root, cfg.OriginalText);
+        var target = Profiles.FilePath(name) is { Length: > 0 } file && file.Length > 0
+            ? file
+            : cfg.FilePath;
+        var fresh = new ConfigDocument(target, root, File.Exists(target) ? File.ReadAllText(target) : "");
         try
         {
             fresh.Save();
@@ -1641,9 +1753,15 @@ public sealed class MainViewModel : ObservableObject
         }
 
         Profiles.Active = name;
-        if (fronted is { } file)
-            Profiles.Assign(file, name);
+        if (!string.Equals(Settings.ConfigPath, target, StringComparison.OrdinalIgnoreCase))
+        {
+            Settings.ConfigPath = target;           // the app now points at the config that was applied
+            Settings.Save();
+        }
+        if (fronted is { } modelFile)
+            Profiles.Assign(modelFile, name);
         reopenConfig();                                     // the app re-reads what was just written
+        ReapplyPolling();                                   // the new config may listen on another port
         return null;
     }
 

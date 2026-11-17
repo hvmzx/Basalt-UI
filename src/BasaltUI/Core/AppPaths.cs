@@ -36,6 +36,9 @@ public static class AppPaths
     public static string LogFile => Path.Combine(Root, "logs", "basalt-ui.log");
     public static string BackupsDir => Path.Combine(Root, "config-backups");
 
+    /// <summary>Each named config's own basalt config file — one file per config, so several can run at once.</summary>
+    public static string ConfigsDir => Path.Combine(Root, "configs");
+
     /// <summary>Where a newer basalt release is downloaded and unpacked before anything of yours is touched.</summary>
     public static string UpdateDir => Path.Combine(Root, "updates");
 

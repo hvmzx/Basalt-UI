@@ -58,11 +58,8 @@ public partial class SettingsPage : UserControl
 
         // one-time wiring: the per-show refresh lives in OnShown, which the main window calls
         ExeBox.LostFocus += (_, _) => CommitSettings();
-        ConfigBox.LostFocus += (_, _) => CommitSettings();
         ModelsFolderBox.LostFocus += (_, _) => CommitSettings();
-        ExtraBox.LostFocus += (_, _) => CommitSettings();
-        KeyBox.LostFocus += (_, _) => CommitSettings();
-        foreach (var box in new[] { StartOnLaunchCheck, StartMinimisedCheck, TrayOnCloseCheck, StopOnExitCheck, OpenWebCheck, AutostartCheck, CheckUpdatesCheck })
+        foreach (var box in new[] { StartOnLaunchCheck, StartMinimisedCheck, TrayOnCloseCheck, StopOnExitCheck, OpenWebCheck, AutostartCheck })
         {
             box.Checked += (_, _) => CommitSettings();
             box.Unchecked += (_, _) => CommitSettings();
@@ -156,12 +153,9 @@ public partial class SettingsPage : UserControl
     private void ReadBasaltTab()
     {
         ExeBox.Text = S.BasaltExePath;
-        ConfigBox.Text = S.ConfigPath;
         ModelsFolderBox.Text = S.ModelsFolder;
-        ExtraBox.Text = S.ExtraArgs;
-        KeyBox.Password = S.ApiKey;
         AutostartCheck.IsChecked = Autostart.IsEnabled();
-        StartOnLaunchCheck.IsChecked = S.StartServerOnLaunch;
+        StartOnLaunchCheck.IsChecked = S.StartConfigsOnLaunch;
         StartMinimisedCheck.IsChecked = S.StartMinimized;
         TrayOnCloseCheck.IsChecked = S.MinimiseToTrayOnClose;
         StopOnExitCheck.IsChecked = S.StopServerOnAppExit;
@@ -171,61 +165,6 @@ public partial class SettingsPage : UserControl
         ConnectionsBox.Text = S.DownloadConnections.ToString();
         MirrorBox.Text = S.HfMirror;
         ProxyBox.Text = S.ProxyUrl;
-        CheckUpdatesCheck.IsChecked = S.CheckForUpdates;
-        SayWhatTheUpdateClockSays();
-        UpdatePreview();
-    }
-
-    /// <summary>
-    /// The update block in this tab is the only place the whole story fits: what we are running, what is out
-    /// there, when we last asked, and the one release the user told us to stop mentioning.
-    /// </summary>
-    private void SayWhatTheUpdateClockSays()
-    {
-        var vm = app.Vm;
-        UpdateFoot.Text = vm.UpdateText;
-        UpdateProblemText.Text = vm.UpdateProblem;
-        DismissFoot.Text = S.DismissedUpdateTag.Length == 0
-            ? vm.Latest is null ? "" : "last asked " + LastAskedText()
-            : $"{S.DismissedUpdateTag} is the one you asked me to stop mentioning.";
-        BringBackButton.Visibility = S.DismissedUpdateTag.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-    }
-
-    private string LastAskedText()
-    {
-        var at = S.LastUpdateCheckUtc;
-        if (at == default)
-            return "never";
-        var age = DateTime.UtcNow - at;
-        if (age.TotalMinutes < 2)
-            return "just now";
-        if (age.TotalMinutes < 90)
-            return $"{(int)age.TotalMinutes} minutes ago";
-        if (age.TotalHours < 20)
-            return "earlier today";
-        return at.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
-    }
-
-    private async void CheckNow_Click(object sender, RoutedEventArgs e)
-    {
-        CheckNowButton.IsEnabled = false;
-        UpdateFoot.Text = "asking GitHub…";
-        UpdateProblemText.Text = "";
-        try
-        {
-            await app.Vm.CheckForUpdateAsync(manual: true);
-        }
-        finally
-        {
-            CheckNowButton.IsEnabled = true;
-            SayWhatTheUpdateClockSays();
-        }
-    }
-
-    private void BringBack_Click(object sender, RoutedEventArgs e)
-    {
-        app.Vm.UpdateUndismiss();
-        SayWhatTheUpdateClockSays();
     }
 
     /// <summary>
@@ -242,13 +181,9 @@ public partial class SettingsPage : UserControl
         committing = true;
         try
         {
-            var previousConfig = S.ConfigPath;
             S.BasaltExePath = ExeBox.Text.Trim();
-            S.ConfigPath = string.IsNullOrWhiteSpace(ConfigBox.Text) ? DefaultConfigPath : ConfigBox.Text.Trim();
             S.ModelsFolder = ModelsFolderBox.Text.Trim();
-            S.ExtraArgs = ExtraBox.Text.Trim();
-            S.ApiKey = KeyBox.Password.Trim();
-            S.StartServerOnLaunch = StartOnLaunchCheck.IsChecked == true;
+            S.StartConfigsOnLaunch = StartOnLaunchCheck.IsChecked == true;
             S.StartMinimized = StartMinimisedCheck.IsChecked == true;
             S.MinimiseToTrayOnClose = TrayOnCloseCheck.IsChecked == true;
             S.StopServerOnAppExit = StopOnExitCheck.IsChecked == true;
@@ -264,44 +199,22 @@ public partial class SettingsPage : UserControl
             S.DownloadConnections = int.TryParse(ConnectionsBox.Text.Trim(), out var conns) ? Math.Clamp(conns, 1, 16) : 8;
             ConnectionsBox.Text = S.DownloadConnections.ToString();
             S.HfMirror = MirrorBox.Text.Trim();
-            S.CheckForUpdates = CheckUpdatesCheck.IsChecked == true;
             var proxy = ProxyBox.Text.Trim();
             if (!string.Equals(S.ProxyUrl, proxy, StringComparison.OrdinalIgnoreCase))
             {
                 S.ProxyUrl = proxy;
                 Net.Configure(proxy);      // the two outbound clients are built around this address
             }
-            SayWhatTheUpdateClockSays();
 
             S.Save();
 
             if (AutostartCheck.IsChecked == true != S.RunAtLogon)
                 app.SetAutostart(AutostartCheck.IsChecked == true);
-
-            if (!string.Equals(previousConfig, S.ConfigPath, StringComparison.OrdinalIgnoreCase))
-            {
-                fileDoc = OpenDoc(S.ConfigPath);
-                fileDoc.MarkDirty();
-                app.UseConfigFile(S.ConfigPath);
-                RebuildEverything();
-            }
-            UpdatePreview();
         }
         finally
         {
             committing = false;
         }
-    }
-
-    private void UpdatePreview()
-    {
-        var exe = string.IsNullOrWhiteSpace(S.BasaltExePath) ? "basalt.exe" : Path.GetFileName(S.BasaltExePath);
-        var line = $"{exe} serve --config {LaunchSpec.Quote(string.IsNullOrWhiteSpace(S.ConfigPath) ? DefaultConfigPath : S.ConfigPath)}";
-        if (!string.IsNullOrWhiteSpace(S.ApiKey))
-            line += " --api-key •••••";
-        if (!string.IsNullOrWhiteSpace(S.ExtraArgs))
-            line += " " + S.ExtraArgs;
-        PreviewText.Text = line;
     }
 
     private void BrowseExe_Click(object sender, RoutedEventArgs e)
@@ -319,69 +232,19 @@ public partial class SettingsPage : UserControl
         CommitSettings();
     }
 
-    private void BrowseConfig_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new OpenFileDialog
-        {
-            Title = "basalt config",
-            Filter = "JSON|*.json|All files|*.*",
-            InitialDirectory = PickFolder(Path.GetDirectoryName(S.ConfigPath), S.ModelsFolder),
-            CheckFileExists = true,
-        };
-        if (dialog.ShowDialog(W) != true)
-            return;
-        ConfigBox.Text = dialog.FileName;
-        CommitSettings();
-    }
-
     private void BrowseModels_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFolderDialog
         {
             Title = "Where the models live",
-            InitialDirectory = PickFolder(S.ModelsFolder, Path.GetDirectoryName(S.ConfigPath)),
+            InitialDirectory = PickFolder(S.ModelsFolder, app.Vm.ActiveConfigFile is { Length: > 0 } f
+                                                          ? Path.GetDirectoryName(f)
+                                                          : null),
         };
         if (dialog.ShowDialog(W) != true)
             return;
         ModelsFolderBox.Text = dialog.FolderName;
         CommitSettings();
-    }
-
-    private void NewConfig_Click(object sender, RoutedEventArgs e)
-    {
-        var dialog = new SaveFileDialog
-        {
-            Title = "A new config file",
-            Filter = "JSON|*.json",
-            FileName = "basalt_config.json",
-            InitialDirectory = PickFolder(S.ModelsFolder, Path.GetDirectoryName(S.ConfigPath)),
-        };
-        if (dialog.ShowDialog(W) != true)
-            return;
-
-        if (File.Exists(dialog.FileName) &&
-            MessageBox.Show(W, "That file already exists. Replace it?", "Basalt UI",
-                            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            return;
-
-        fileDoc = ConfigDocument.Blank(dialog.FileName, GuessModelPath());
-        ConfigBox.Text = dialog.FileName;
-        CommitSettings();
-        RebuildEverything();
-        ShowRaw();
-        Tabs.SelectedIndex = 1;
-    }
-
-    private void CopyCommandLine_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            Clipboard.SetText(PreviewText.Text);
-        }
-        catch
-        {
-            // the clipboard can be busy; the text is on screen anyway
-        }
     }
 
     private void OpenAppFolder_Click(object sender, RoutedEventArgs e)
@@ -394,6 +257,31 @@ public partial class SettingsPage : UserControl
         catch (Exception ex)
         {
             app.Notify("could not open the folder: " + ex.Message);
+        }
+    }
+
+    /// <summary>All the app's settings and all its configs in one file — a backup that can be read back
+    /// by a person, not just restored by the app.</summary>
+    private void ExportConfiguration_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export Basalt UI configuration",
+            Filter = "JSON|*.json",
+            FileName = "basalt-ui-configuration.json",
+            InitialDirectory = PickFolder(Path.GetDirectoryName(AppPaths.SettingsFile)),
+        };
+        if (dialog.ShowDialog(W) != true)
+            return;
+        try
+        {
+            File.WriteAllText(dialog.FileName, app.Vm.ExportConfiguration());
+            FootText.Text = "exported to " + Path.GetFileName(dialog.FileName);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(W, "The file could not be written:\n\n" + ex.Message,
+                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
@@ -483,33 +371,6 @@ public partial class SettingsPage : UserControl
         _ = UpdateLoadPreview();
     }
 
-    /// <summary>
-    /// The Models tab with one model's entry selected — what the main page's right-click asks for. The
-    /// entry is matched by its file's name, the same word the row and the config both carry. A model the
-    /// config does not name has no entry to edit, and the page stays where it was.
-    /// </summary>
-    public void RevealModel(ViewModels.HomeModelRow row)
-    {
-        Tabs.SelectedIndex = 1;             // the Models tab — leaving the Configs tab persists its config first
-        var want = Path.GetFileName(row.Id);
-        var index = -1;
-        var entries = fileDoc.ModelEntries().ToList();
-        for (var i = 0; i < entries.Count; i++)
-        {
-            var model = ConfigDocument.Text(entries[i], "model") ?? "";
-            if (Path.GetFileName(model).Equals(want, StringComparison.OrdinalIgnoreCase))
-            {
-                index = i;
-                break;
-            }
-        }
-        if (index < 0)
-            return;
-        ModelsList.SelectedIndex = index;   // the entry — SelectionChanged shows its fields
-        if (ModelsList.ItemContainerGenerator.ContainerFromIndex(index) is ListBoxItem item)
-            item.BringIntoView();
-    }
-
     // ---- the Configs tab -------------------------------------------------------------------------------------
     // Named configs are whole basalt config documents — their own models, server, engine, raw JSON — kept
     // beside the file. One is the active one: the config file on disk currently carries its document.
@@ -518,7 +379,7 @@ public partial class SettingsPage : UserControl
     /// <summary>The Configs tab with one config selected — what a model row's right-click asks for.</summary>
     public void RevealProfile(string name)
     {
-        Tabs.SelectedIndex = 2;             // the Configs tab — SelectionChanged loads the config's document
+        Tabs.SelectedIndex = 1;             // the Configs tab — SelectionChanged loads the config's document
         RebuildProfiles(name);
         if (ProfilesList.ItemContainerGenerator.ContainerFromIndex(ProfilesList.SelectedIndex) is ListBoxItem item)
             item.BringIntoView();
@@ -630,16 +491,77 @@ public partial class SettingsPage : UserControl
 
     private void ShowProfileState()
     {
-        if (profileName is null)
+        var name = profileName;
+        ProfileFileBox.IsEnabled = ProfileKeyBox.IsEnabled = ProfileArgsBox.IsEnabled = ProfileStartCheck.IsEnabled = name is not null;
+        ProfileFileBox.Text = name is null ? "" : app.Vm.Profiles.FilePath(name) ?? "";
+        ProfileKeyBox.Password = name is null ? "" : app.Vm.Profiles.ApiKey(name);
+        ProfileArgsBox.Text = name is null ? "" : app.Vm.Profiles.ExtraArgs(name);
+        ProfileStartCheck.IsChecked = name is not null && app.Vm.Profiles.StartsOnLaunch(name);
+        var exe = string.IsNullOrWhiteSpace(S.BasaltExePath) ? "basalt.exe" : Path.GetFileName(S.BasaltExePath);
+        var file = name is null ? "" : app.Vm.Profiles.FilePath(name) ?? "";
+        var line = $"{exe} serve --config {LaunchSpec.Quote(file)}";
+        if (!string.IsNullOrWhiteSpace(ProfileKeyBox.Password))
+            line += " --api-key •••••";
+        if (!string.IsNullOrWhiteSpace(ProfileArgsBox.Text))
+            line += " " + ProfileArgsBox.Text.Trim();
+        ProfileCommand.Text = name is null ? "" : line;
+
+        if (name is null)
         {
             ProfileState.Text = "";
             ProfileAttached.Text = $"stored in {ConfigProfiles.StorePath}";
             return;
         }
-        ProfileState.Text = app.Vm.Profiles.Active == profileName
+        ProfileState.Text = app.Vm.Profiles.Active == name
             ? "● active — the config file carries this one"
             : "not in the file — a model attaching it applies it";
         ProfileAttached.Text = $"stored in {ConfigProfiles.StorePath}";
+    }
+
+    /// <summary>The launch words belong to the config, not to the app: they travel with it in the store.</summary>
+    private void ProfileFile_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (profileName is not null)
+            app.Vm.Profiles.SetLaunch(profileName, file: ProfileFileBox.Text);
+        ShowProfileState();
+    }
+
+    private void ProfileKey_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (profileName is not null)
+            app.Vm.Profiles.SetLaunch(profileName, apiKey: ProfileKeyBox.Password);
+        ShowProfileState();
+    }
+
+    private void ProfileArgs_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (profileName is not null)
+            app.Vm.Profiles.SetLaunch(profileName, extraArgs: ProfileArgsBox.Text);
+        ShowProfileState();
+    }
+
+    private void ProfileStart_Changed(object sender, RoutedEventArgs e)
+    {
+        if (profileName is not null)
+            app.Vm.Profiles.SetLaunch(profileName, startOnLaunch: ProfileStartCheck.IsChecked == true);
+    }
+
+    private void ProfileBrowse_Click(object sender, RoutedEventArgs e)
+    {
+        if (profileName is null)
+            return;
+        var dialog = new SaveFileDialog
+        {
+            Title = "Where this config is written",
+            Filter = "JSON|*.json",
+            FileName = Path.GetFileName(app.Vm.Profiles.FilePath(profileName) ?? "config.json"),
+            InitialDirectory = PickFolder(Path.GetDirectoryName(app.Vm.Profiles.FilePath(profileName)),
+                                          AppPaths.ConfigsDir),
+        };
+        if (dialog.ShowDialog(W) != true)
+            return;
+        app.Vm.Profiles.SetLaunch(profileName, file: dialog.FileName);
+        ShowProfileState();
     }
 
     private void DuplicateProfileIcon_Click(object sender, RoutedEventArgs e)
@@ -1521,15 +1443,6 @@ public partial class SettingsPage : UserControl
                 RebuildEverything();
             }
         }
-        var raw = (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Raw JSON";
-        if (!raw && RawBox.IsLoaded && !string.IsNullOrEmpty(RawBox.Text) && RawBox.Text != fileDoc.ToJson())
-        {
-            // whatever they typed becomes the document, so the form and the file cannot drift apart
-            if (!ApplyRaw())
-                return;
-        }
-        if (raw)
-            ShowRaw();
         UpdateDirty();
     }
 
@@ -1537,11 +1450,9 @@ public partial class SettingsPage : UserControl
     {
         var index = Tabs.SelectedIndex;
         PageBasalt.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
-        PageModels.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
-        PageConfigs.Visibility = index == 2 ? Visibility.Visible : Visibility.Collapsed;
-        PageServer.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
-        PageEngine.Visibility = index == 4 ? Visibility.Visible : Visibility.Collapsed;
-        PageRaw.Visibility = index == 5 ? Visibility.Visible : Visibility.Collapsed;
+        PageConfigs.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
+        // Models, Server, Engine and Raw JSON are not pages of this tab strip any more — they are
+        // sub-tabs of the selected config, where they belong.
     }
 
     // ---- saving --------------------------------------------------------------------------------------------

@@ -134,27 +134,22 @@ internal static class Program
         settingsHost.OpenSettings();
         written += Shoot(settingsHost, Path.Combine(dir, "02-settings.png"), maps);
 
-        // The Server and Models tabs of the machine's own config: host and port are the fields people edit
-        // here, and the Models tab carries the load preview card — which answers asynchronously (it reads
-        // the file's header and asks nvidia-smi), so the capture waits for the card to appear or time out.
+        // The Configs tab and its Models sub-tab: the load preview there answers asynchronously, so the
+        // capture waits for the card to appear or time out.
         var settingsPanel = Field<SettingsPage>(settingsHost, "SettingsPanel");
         var tabs = Field<System.Windows.Controls.TabControl>(settingsPanel, "Tabs");
-        if (settingsPanel is not null && tabs is not null)
+        var configTabs = Field<System.Windows.Controls.TabControl>(settingsPanel, "ConfigTabs");
+        if (settingsPanel is not null && tabs is not null && configTabs is not null)
         {
-            tabs.SelectedIndex = 2;                     // Configs, the named configs and their fields
+            tabs.SelectedIndex = 1;                     // Configs
+            configTabs.SelectedIndex = 0;               // its Models sub-tab
             WaitUntil(() => true, 0);
             written += Shoot(settingsHost, Path.Combine(dir, "02a-settings-configs.png"), maps);
 
-            tabs.SelectedIndex = 3;                     // Server
-            WaitUntil(() => true, 0);
-            written += Shoot(settingsHost, Path.Combine(dir, "02b-settings-server.png"), maps,
-                             ("fields", 40, 130, 920, 330));
-
-            tabs.SelectedIndex = 1;                     // Models, with the load preview
-            WaitUntil(() => Field<System.Windows.Controls.Border>(settingsPanel, "PreviewCard")
+            WaitUntil(() => Field<System.Windows.Controls.Border>(settingsPanel, "ConfigPreviewCard")
                               ?.Visibility == Visibility.Visible, 8000);
-            var card = Field<System.Windows.Controls.Border>(settingsPanel, "PreviewCard");
-            var verdict = Field<System.Windows.Controls.TextBlock>(settingsPanel, "PreviewVerdict");
+            var card = Field<System.Windows.Controls.Border>(settingsPanel, "ConfigPreviewCard");
+            var verdict = Field<System.Windows.Controls.TextBlock>(settingsPanel, "ConfigPreviewVerdict");
             Console.WriteLine($"  preview card: {card?.Visibility}, verdict: \"{verdict?.Text}\"");
 
             // what the preview itself says, computed here rather than through the page's async path

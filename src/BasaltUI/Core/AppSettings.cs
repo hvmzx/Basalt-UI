@@ -138,6 +138,8 @@ public sealed class AppSettings
     public string ApiKey { get; set; } = "";
 
     public bool StartServerOnLaunch { get; set; }
+    /// <summary>The general switch: when Basalt UI opens, start the configs that asked for it.</summary>
+    public bool StartConfigsOnLaunch { get; set; }
     public bool StartMinimized { get; set; }
     public bool RunAtLogon { get; set; }
     public bool MinimiseToTrayOnClose { get; set; } = true;

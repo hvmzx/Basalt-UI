@@ -36,6 +36,8 @@
                       HorizontalAlignment="Left" Margin="0,12,0,0"
                       ToolTip="{Binding SelectedItem, RelativeSource={RelativeSource Self}}" />
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                <Button x:Name="DetailsButton" Content="View changelog" Click="Details_Click" MinWidth="112"
+                        Visibility="Collapsed" Margin="0,0,8,0" />
                 <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" MinWidth="92"
                         IsCancel="True" Margin="0,0,8,0" />
                 <Button x:Name="ConfirmButton" Content="Continue" Click="Confirm_Click" MinWidth="92"
