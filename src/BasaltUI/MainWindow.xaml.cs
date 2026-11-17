@@ -429,10 +429,8 @@ public partial class MainWindow : Window
         if (worn is not null)
             attach.Items.Add(Item("(no config)", () => Vm.AttachProfile(row, null)));
         if (attach.Items.Count == 0)
-        {
-            attach.IsEnabled = false;
-            attach.ToolTip = "No configs yet — make one with “New config for this model…”";
-        }
+            attach.Items.Add(Item("(no configs yet)", () => { }, enabled: false,
+                                  "Make the first one with “Make a config from this entry…” below"));
         attach.Items.Add(new Separator());
         attach.Items.Add(Item("New config for this model…", () =>
         {
@@ -441,6 +439,16 @@ public partial class MainWindow : Window
             SettingsPanel.RevealProfile(name);
         }, tip: "A fresh, empty config, attached to this model at once, ready to be shaped"));
         menu.Items.Add(attach);
+
+        menu.Items.Add(Item("Make a config from this entry…", () =>
+        {
+            var name = Vm.CaptureProfile(row);
+            if (name.Length > 0)
+            {
+                ShowPage(Page.Settings);
+                SettingsPanel.RevealProfile(name);
+            }
+        }, tip: "This entry's fields as they stand become a new named config, attached to this model — the way a default is made"));
 
         if (worn is null)
             menu.Items.Add(Item("Edit this entry's own fields…", () => { ShowPage(Page.Settings); SettingsPanel.RevealModel(row); },

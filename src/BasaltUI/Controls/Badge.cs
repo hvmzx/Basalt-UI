@@ -64,18 +64,12 @@ public class Badge : FrameworkElement
         if (w < 10 || h < 10)
             return;
 
-        var tint = id.Tint;
-        var fill = new SolidColorBrush(Color.FromArgb(0x2E, tint.R, tint.G, tint.B));
-        var edge = new Pen(new SolidColorBrush(Color.FromArgb(0x59, tint.R, tint.G, tint.B)), 1);
-        var rect = new Rect(0.5, 0.5, w - 1, h - 1);
-        dc.DrawRoundedRectangle(fill, edge, rect, Math.Min(w, h) / 4, Math.Min(w, h) / 4);
-
         var mark = Logo(id.Logo);
         if (mark is { PixelWidth: > 0, PixelHeight: > 0 })
         {
-            // The family's own mark, fitted inside the tile: never stretched, letterboxed instead, and
-            // small enough that the tile's rounded edge keeps its shape around it.
-            var scale = Math.Min(w / mark.PixelWidth, h / mark.PixelHeight) * 0.72;
+            // The family's own mark, drawn on its own: no tile behind it, just the logo fitted to the
+            // space — never stretched, letterboxed when the space is not the mark's shape.
+            var scale = Math.Min(w / mark.PixelWidth, h / mark.PixelHeight);
             var draw = mark.Width > 0 && mark.Height > 0
                 ? new Rect((w - mark.Width * scale) / 2, (h - mark.Height * scale) / 2, mark.Width * scale, mark.Height * scale)
                 : new Rect((w - mark.PixelWidth * scale) / 2, (h - mark.PixelHeight * scale) / 2, mark.PixelWidth * scale, mark.PixelHeight * scale);
@@ -83,8 +77,15 @@ public class Badge : FrameworkElement
             return;
         }
 
-        // The full-strength tint for the letters: a whitish monogram would disappear on the same tile once
-        // it stood on a light surface.
+        // Families without a carried mark keep the tinted tile and its monogram: the tile is the
+        // family's colour at low strength over whatever surface it stands on, so dark and light themes
+        // both read it, and the letters wear the full-strength tint — a whitish monogram would
+        // disappear on the same tile once it stood on a light surface.
+        var tint = id.Tint;
+        var fill = new SolidColorBrush(Color.FromArgb(0x2E, tint.R, tint.G, tint.B));
+        var edge = new Pen(new SolidColorBrush(Color.FromArgb(0x59, tint.R, tint.G, tint.B)), 1);
+        var rect = new Rect(0.5, 0.5, w - 1, h - 1);
+        dc.DrawRoundedRectangle(fill, edge, rect, Math.Min(w, h) / 4, Math.Min(w, h) / 4);
         var text = Text(id.Monogram, Math.Max(9, Math.Min(w, h) / 2.3), id.Tint);
         dc.DrawText(text, new Point((w - text.Width) / 2, (h - text.Height) / 2 - 0.5));
     }

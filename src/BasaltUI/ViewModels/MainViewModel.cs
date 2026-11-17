@@ -1625,6 +1625,34 @@ public sealed class MainViewModel : ObservableObject
         return name;
     }
 
+    /// <summary>
+    /// The entry's fields as they stand become a new named config, attached to the model that asked —
+    /// the way a default is made: the config that is already working gets a name, and every other model
+    /// can wear it from its row. The model path and the alias stay the entry's own; everything else the
+    /// entry carries goes into the config.
+    /// </summary>
+    public string CaptureProfile(HomeModelRow row)
+    {
+        var doc = getConfig();
+        var entry = doc?.ModelEntries().FirstOrDefault(
+            e => SameModelFile(ConfigDocument.Text(e, "model"), row.Id));
+        if (doc is null || entry is null)
+        {
+            Append($"no config entry for {row.Id} — double-click the model and one is added", LogSource.Error);
+            return "";
+        }
+        var name = Profiles.Create("default");
+        var fields = Profiles.Fields(name)!;
+        foreach (var kv in entry)
+            if (kv.Value is not null &&
+                !kv.Key.Equals("model", StringComparison.OrdinalIgnoreCase) &&
+                !kv.Key.Equals("alias", StringComparison.OrdinalIgnoreCase))
+                fields[kv.Key] = JsonNode.Parse(kv.Value.ToJsonString());
+        Profiles.Save();
+        AttachProfile(row, name);
+        return name;
+    }
+
     // ---- the recorder's hand to the row and the window ----------------------------------------------------------
     /// <summary>
     /// The one number a model row can say about its past: the average decode speed of the session under way
