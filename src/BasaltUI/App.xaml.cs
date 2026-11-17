@@ -221,7 +221,17 @@ public partial class App : Application
             }
             Vm.SetForeign(pids);
             if (pids.Length > 0)
+            {
+                // A dialog needs an owner that is already on screen, or WPF centers it on the display
+                // instead of the app window.
+                if (!window.IsLoaded)
+                {
+                    var loaded = new TaskCompletionSource();
+                    window.Loaded += (_, _) => loaded.TrySetResult();
+                    await loaded.Task;
+                }
                 await AskAboutForeignAsync(pids, Config?.Port ?? 8080);
+            }
         }
     }
 

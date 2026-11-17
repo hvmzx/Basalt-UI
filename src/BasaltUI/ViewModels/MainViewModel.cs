@@ -1515,6 +1515,40 @@ public sealed class MainViewModel : ObservableObject
         helper.Adopt(pid, $"foreign server on port {port}");
         helper.ServePort = port;
         await helper.StopAsync(Settings.StopGraceSeconds, userDirected: true);
+
+        // A basalt launcher can exit while its python engine still holds the socket. Wait for the port to
+        // actually be free, and clear any surviving basalt process on it — the user chose to stop it.
+        for (var i = 0; i < 60; i++)
+        {
+            var left = NativeMethods.ListenersOnPort((ushort)port);
+            if (left.Length == 0)
+                break;
+            if (i is 16 or 32)
+                foreach (var survivor in left)
+                {
+                    try
+                    {
+                        using var survivorProcess = Process.GetProcessById(survivor);
+                        if (survivorProcess.ProcessName.Contains("basalt", StringComparison.OrdinalIgnoreCase))
+                            survivorProcess.Kill(entireProcessTree: true);
+                    }
+                    catch
+                    {
+                        // already gone between the scan and the kill
+                    }
+                }
+            await Task.Delay(250);
+        }
+        var still = NativeMethods.ListenersOnPort((ushort)port);
+        if (still.Length > 0)
+            Notice?.Invoke($"port {port} is still held by pid {string.Join(", ", still)} — Basalt UI left it alone from here");
+        else
+            Append($"app: port {port} is free again", LogSource.App);
+
+        // The poller's next beat confirms it, but the pill must not keep saying "generating" until then.
+        Status = ServerStatus.Down("");
+        Raise(nameof(RunStateText));
+        Raise(nameof(StatusText));
         SetForeign([]);
         Append($"app: stopped the server on port {port} (pid {pid})", LogSource.App);
     }
