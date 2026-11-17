@@ -26,6 +26,7 @@ public partial class MainWindow : Window
         this.app = app;
         InitializeComponent();
         DataContext = Vm;
+        ThemeGlyph.Text = App.IsDarkTheme ? "\uE708" : "\uE706";
 
         ApplySavedBounds();
         SourceInitialized += (_, _) =>
@@ -384,6 +385,22 @@ public partial class MainWindow : Window
     /// the view model, which asks the recorder, so the list always says what was actually seen — and the
     /// time the app was away, counted from the engine's own totals, stands as its own ≈ line.
     /// </summary>
+    /// <summary>The one light/dark switch on the main page: a moon in dark mode, a sun in light.</summary>
+    private void Theme_Click(object sender, RoutedEventArgs e)
+    {
+        app.ToggleTheme();
+        ThemeGlyph.Text = App.IsDarkTheme ? "\uE708" : "\uE706";
+        Shell.Win11.Round(this, App.IsDarkTheme);
+    }
+
+    /// <summary>The web UI belongs to the config the model runs with, not to one global server.</summary>
+    private void WebUi_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { Tag: HomeModelRow row })
+            Vm.OpenWebUiFor(row);
+    }
+
     private void History_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;

@@ -389,7 +389,7 @@
                             </DockPanel>
 
                             <DockPanel Grid.Column="2" Margin="0,0,0,0">
-                                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                                <Border Visibility="Collapsed" DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
                                     <DockPanel LastChildFill="False">
                                         <TextBlock DockPanel.Dock="Left" Text="Add a field" Style="{StaticResource Label}"
                                                    VerticalAlignment="Center" />
@@ -397,6 +397,12 @@
                                         <ComboBox x:Name="ConfigAddFieldCombo" DockPanel.Dock="Right" Width="330" Margin="0,0,8,0" />
                                     </DockPanel>
                                 </Border>
+                                <DockPanel Margin="0,0,0,8" LastChildFill="False">
+                                    <TextBlock Text="load preview" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                    <Button DockPanel.Dock="Right" x:Name="ConfigPreviewButton" Content="Preview…"
+                                            Click="PreviewButton_Click"
+                                            ToolTip="Measure this model against this machine — how it would be split across VRAM and RAM" />
+                                </DockPanel>
                                 <TextBlock DockPanel.Dock="Top" x:Name="ConfigModelHint" Style="{StaticResource Label}"
                                            Margin="0,0,0,8" TextWrapping="Wrap" />
                                 <Border x:Name="ConfigPreviewCard" DockPanel.Dock="Bottom" Style="{StaticResource Card}"
@@ -420,7 +426,7 @@
 
                         <Grid x:Name="ConfigPageServer" Visibility="Collapsed">
                             <DockPanel Margin="0,0,0,0">
-                                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                                <Border Visibility="Collapsed" DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
                                     <DockPanel LastChildFill="False">
                                         <TextBlock DockPanel.Dock="Left" x:Name="ConfigServerNote" Text="Address the server listens on."
                                                    Style="{StaticResource Label}" TextWrapping="Wrap" MaxWidth="560" VerticalAlignment="Center" />
@@ -436,7 +442,7 @@
 
                         <Grid x:Name="ConfigPageEngine" Visibility="Collapsed">
                             <DockPanel Margin="0,0,0,0">
-                                <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
+                                <Border Visibility="Collapsed" DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
                                     <DockPanel LastChildFill="False">
                                         <TextBlock DockPanel.Dock="Left"
                                                    Text="Defaults for every model in this config. A field set on a single model wins over the same field here."

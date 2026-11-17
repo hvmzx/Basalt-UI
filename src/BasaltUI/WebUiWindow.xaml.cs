@@ -44,10 +44,9 @@ public partial class WebUiWindow : Window
             }
             catch (Exception e)
             {
-                MessageBox.Show(this,
+                Shell.Dialog.Info(this, "Basalt UI",
                     "The embedded browser could not start:\n\n" + e.Message +
-                    "\n\nThe engine's web page is at " + url + " — it can still be opened in your browser.",
-                    "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    "\n\nThe engine's web page is at " + url + " — it can still be opened in your browser.");
             }
         };
     }

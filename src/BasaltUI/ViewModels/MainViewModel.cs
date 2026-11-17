@@ -937,6 +937,24 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Open the web UI of the server this model actually runs with — the config assigned to its
+    /// row, or the active one when it has no assignment. With several basalts there is no single web UI.</summary>
+    public void OpenWebUiFor(HomeModelRow row)
+    {
+        var name = Profiles.AssignedTo(row.Id);
+        var document = name is not null ? Profiles.Document(name) : getConfig()?.Root;
+        var host = "127.0.0.1";
+        var port = 8080;
+        if (document?["server"] is JsonObject server)
+        {
+            var listening = ConfigDocument.Text(server, "host") ?? host;
+            host = ConfigDocument.ThisPcOnly(listening) ? "127.0.0.1" : listening;
+            if (int.TryParse(ConfigDocument.Text(server, "port"), out var p) && p is > 0 and < 65536)
+                port = p;
+        }
+        WebUiRequested?.Invoke($"http://{host}:{port}/");
+    }
+
     // ---- actions ---------------------------------------------------------------------------------------
     /// <summary>The api key belongs to the active config: it is passed on that config's command line and
     /// sent as the bearer key when polling its server. Older settings with no active config still work.</summary>

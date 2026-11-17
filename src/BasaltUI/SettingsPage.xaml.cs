@@ -67,9 +67,6 @@ public partial class SettingsPage : UserControl
         foreach (var box in new[] { ConnectionsBox, MirrorBox, ProxyBox })
             box.LostFocus += (_, _) => CommitSettings();
 
-        mainPreview = new PreviewUI(PreviewCard, PreviewVerdict, PreviewRows, PreviewNote);
-        configPreview = new PreviewUI(ConfigPreviewCard, ConfigPreviewVerdict, ConfigPreviewRows, ConfigPreviewNote);
-
         OnShown();
     }
 
@@ -111,9 +108,8 @@ public partial class SettingsPage : UserControl
         }
         catch (Exception e)
         {
-            MessageBox.Show(W, "That file could not be read:\n\n" + e.Message +
-                               "\n\nThe editor is showing a fresh starting point instead. Nothing has been written yet.",
-                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shell.Dialog.Info(W, "Basalt UI", "That file could not be read:\n\n" + e.Message +
+                              "\n\nThe editor is showing a fresh starting point instead. Nothing has been written yet.");
             return ConfigDocument.Blank(path, "");
         }
     }
@@ -280,8 +276,7 @@ public partial class SettingsPage : UserControl
         }
         catch (Exception ex)
         {
-            MessageBox.Show(W, "The file could not be written:\n\n" + ex.Message,
-                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shell.Dialog.Info(W, "Basalt UI", "The file could not be written:\n\n" + ex.Message);
         }
     }
 
@@ -361,14 +356,13 @@ public partial class SettingsPage : UserControl
             fields.Children.Clear();
             hint.Text = "Add a model to get started — the path to a .basalt or .gguf file is enough.";
             combo.IsEnabled = false;
-            Preview.Card.Visibility = Visibility.Collapsed;
-            previewRun++;                       // a preview already on its way belongs to an entry that is gone
+            ConfigPreviewButton.IsEnabled = false;
             return;
         }
         hint.Text = "Only what you set here goes into the file; anything you leave out keeps basalt's default.";
         combo.IsEnabled = true;
+        ConfigPreviewButton.IsEnabled = true;
         BuildScopeFields(fields, entry, "entry", EntryCommon, combo);
-        _ = UpdateLoadPreview();
     }
 
     // ---- the Configs tab -------------------------------------------------------------------------------------
@@ -461,11 +455,10 @@ public partial class SettingsPage : UserControl
 
         var errors = configDoc.Validate(catalog).Where(i => i.Error).ToList();
         if (errors.Count > 0 &&
-            MessageBox.Show(W,
-                            "basalt will probably refuse to start with this config:\n\n" +
-                            string.Join("\n", errors.Select(x => "· " + x.Where + " — " + x.Message)) +
-                            "\n\nKeep it anyway?",
-                            "Basalt UI", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            !Shell.Dialog.Confirm(W, "Basalt UI",
+                "basalt will probably refuse to start with this config:\n\n" +
+                string.Join("\n", errors.Select(x => "· " + x.Where + " — " + x.Message)) +
+                "\n\nKeep it anyway?", "Keep it", "Go back"))
             return false;
 
         app.Vm.Profiles.Update(profileName, configDoc.Root);
@@ -475,8 +468,7 @@ public partial class SettingsPage : UserControl
             var error = app.Vm.ApplyProfile(profileName, null);
             if (error is not null)
             {
-                MessageBox.Show(W, "The config is kept in the store, but the file could not take it:\n\n" + error,
-                                "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shell.Dialog.Info(W, "Basalt UI", "The config is kept in the store, but the file could not take it:\n\n" + error);
                 FootText.Text = "kept in the store; the file refused the change";
                 UpdateDirty();
                 return false;
@@ -676,9 +668,9 @@ public partial class SettingsPage : UserControl
         if (profileName is null)
             return;
         var name = profileName;
-        if (MessageBox.Show(W, $"Delete the config “{name}”?\n\nThe models that ran with it lose the link; " +
-                               "the config file is untouched.", "Basalt UI",
-                            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        if (!Shell.Dialog.Confirm(W, "Delete this config?",
+                                  $"Delete the config “{name}”?\n\nThe models that ran with it lose the link; " +
+                                  "the config file is untouched.", "Delete", "Keep it"))
             return;
         profileName = null;
         app.Vm.Profiles.Delete(name);
@@ -690,66 +682,34 @@ public partial class SettingsPage : UserControl
     private bool OnConfigsTab => (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Configs";
 
     // ---- the load preview ------------------------------------------------------------------------------------
-    private int previewRun;
-
-    /// <summary>One load-preview card: whichever page is visible owns the one being shown.</summary>
-    private sealed record PreviewUI(Border Card, TextBlock Verdict, StackPanel Rows, TextBlock Note);
-
-    private PreviewUI mainPreview = null!;
-    private PreviewUI configPreview = null!;
-
-    private PreviewUI Preview => OnConfigsTab ? configPreview : mainPreview;
-
-    /// <summary>
-    /// How the selected entry's model file would load on this machine. The measuring itself runs off the
-    /// UI thread (it opens the file's 64 KiB header and asks nvidia-smi), and a run counter discards the
-    /// answer of a selection that has moved on since.
-    /// </summary>
-    private async Task UpdateLoadPreview()
+    // ---- the load preview, on demand --------------------------------------------------------------------------
+    /// <summary>Measure the selected model only when asked, then say what the split would be in the app's
+    /// own dialog — no card parked under the editor taking up the whole page.</summary>
+    private async void PreviewButton_Click(object sender, RoutedEventArgs e)
     {
-        var run = ++previewRun;
         var path = ConfigDocument.Text(entry ?? new JsonObject(), "model");
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            if (run == previewRun)
-                Preview.Card.Visibility = Visibility.Collapsed;
+            Shell.Dialog.Info(W, "Load preview", "There is no model file to measure yet — pick one for this entry first.");
             return;
         }
-
-        // The measuring runs off the UI thread; the answer goes onto the card through the dispatcher rather than
-        // on whatever thread the await happens to resume on, and a failure goes there too. A swallowed exception
-        // in a fire-and-forget call is exactly how this card sat empty with nothing to show for it.
+        ConfigPreviewButton.IsEnabled = false;
         try
         {
             var options = PreviewOptions(path);
             var plan = await Task.Run(() => LoadPreview.ForFile(path, options));
-            Dispatcher.Invoke(() => ShowPreview(run, plan));
+            var text = plan.Verdict + "\n\n" + string.Join("\n", plan.Rows.Select(r => $"{r.Label}: {r.Value}")) +
+                       (string.IsNullOrWhiteSpace(plan.Note) ? "" : "\n\n" + plan.Note);
+            Shell.Dialog.Info(W, "Load preview — " + Path.GetFileName(path), text);
         }
         catch (Exception ex)
         {
-            Dispatcher.Invoke(() =>
-            {
-                if (run != previewRun)
-                    return;
-                Preview.Card.Visibility = Visibility.Visible;
-                Preview.Verdict.Text = "could not read this file — " + ex.Message;
-                Preview.Rows.Children.Clear();
-                Preview.Note.Text = "nothing here blocks anything: saving the config never waits for the preview.";
-            });
+            Shell.Dialog.Info(W, "Load preview", "Could not read this model file:\n\n" + ex.Message);
         }
-    }
-
-    /// <summary>Fills the card, unless the selection has moved on since this preview started.</summary>
-    private void ShowPreview(int run, LoadPreview.Plan plan)
-    {
-        if (run != previewRun)
-            return;
-        Preview.Card.Visibility = Visibility.Visible;
-        Preview.Verdict.Text = plan.Verdict;
-        Preview.Rows.Children.Clear();
-        foreach (var (label, value) in plan.Rows)
-            Preview.Rows.Children.Add(PreviewRow(label, value));
-        Preview.Note.Text = plan.Note;
+        finally
+        {
+            ConfigPreviewButton.IsEnabled = entry is not null;
+        }
     }
 
     /// <summary>The entry's own kv, context, slots, vision and GPU, plus the engine's resident-experts switch.</summary>
@@ -815,9 +775,9 @@ public partial class SettingsPage : UserControl
     {
         if (entry is null)
             return;
-        if (MessageBox.Show(W, "Remove this model from the config?\n\n" + LabelFor(entry) +
-                                   "\n\nThe file on disk is not touched.", "Basalt UI",
-                             MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        if (!Shell.Dialog.Confirm(W, "Remove this model?",
+                                  "Remove this model from the config?\n\n" + LabelFor(entry) +
+                                  "\n\nThe file on disk is not touched.", "Remove", "Keep it"))
             return;
         doc.Models.Remove(entry);
         doc.MarkDirty();
@@ -1320,8 +1280,7 @@ public partial class SettingsPage : UserControl
         }
         catch (Exception e)
         {
-            MessageBox.Show(W, "The JSON on that tab is not valid:\n\n" + e.Message,
-                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shell.Dialog.Info(W, "Basalt UI", "The JSON on that tab is not valid:\n\n" + e.Message);
             return false;
         }
     }
@@ -1358,8 +1317,7 @@ public partial class SettingsPage : UserControl
         }
         catch (Exception e)
         {
-            MessageBox.Show(W, "The JSON on that tab is not valid:\n\n" + e.Message,
-                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shell.Dialog.Info(W, "Basalt UI", "The JSON on that tab is not valid:\n\n" + e.Message);
             return false;
         }
     }
@@ -1477,19 +1435,17 @@ public partial class SettingsPage : UserControl
 
         var errors = doc.Validate(catalog).Where(i => i.Error).ToList();
         if (errors.Count > 0 &&
-            MessageBox.Show(W,
-                            "basalt will probably refuse to start with this config:\n\n" +
-                            string.Join("\n", errors.Select(x => "· " + x.Where + " — " + x.Message)) +
-                            "\n\nSave it anyway?",
-                            "Basalt UI", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            !Shell.Dialog.Confirm(W, "Basalt UI",
+                "basalt will probably refuse to start with this config:\n\n" +
+                string.Join("\n", errors.Select(x => "· " + x.Where + " — " + x.Message)) +
+                "\n\nSave it anyway?", "Save it", "Go back"))
             return false;
 
         var backup = LatestBackupName;
         var error = doc.Save();
         if (error is not null)
         {
-            MessageBox.Show(W, "The file could not be saved:\n\n" + error, "Basalt UI",
-                            MessageBoxButton.OK, MessageBoxImage.Error);
+            Shell.Dialog.Info(W, "Basalt UI", "The file could not be saved:\n\n" + error);
             return false;
         }
         doc.MarkSaved();
@@ -1535,8 +1491,8 @@ public partial class SettingsPage : UserControl
         if (OnConfigsTab)
         {
             if (configDoc.Dirty &&
-                MessageBox.Show(W, "Discard the changes to this config and re-read it from the store?",
-                                "Basalt UI", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                !Shell.Dialog.Confirm(W, "Basalt UI", "Discard the changes to this config and re-read it from the store?",
+                                      "Discard", "Keep the changes"))
                 return;
             LoadConfigDoc();
             RebuildCurrentPage();
@@ -1545,13 +1501,12 @@ public partial class SettingsPage : UserControl
         }
         if (!File.Exists(fileDoc.FilePath))
         {
-            MessageBox.Show(W, "There is nothing on disk to go back to; this file has not been saved yet.",
-                            "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Information);
+            Shell.Dialog.Info(W, "Basalt UI", "There is nothing on disk to go back to; this file has not been saved yet.");
             return;
         }
         if (fileDoc.Dirty &&
-            MessageBox.Show(W, "Discard the changes on this page and re-read the file?", "Basalt UI",
-                            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            !Shell.Dialog.Confirm(W, "Basalt UI", "Discard the changes on this page and re-read the file?",
+                                  "Discard", "Keep the changes"))
             return;
         fileDoc = ConfigDocument.Load(fileDoc.FilePath);
         RebuildEverything();
@@ -1578,13 +1533,13 @@ public partial class SettingsPage : UserControl
             CommitSettings();
         if (OnConfigsTab && configDoc.Dirty)
         {
-            var keep = MessageBox.Show(W,
+            var keep = Shell.Dialog.ConfirmThree(W, "Basalt UI",
                 $"The config “{profileName}” has unsaved changes.\n\n" +
                 "Keep it before going back? It goes into the store, and into the config file if it is the active one.",
-                "Basalt UI", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            if (keep == MessageBoxResult.Cancel)
+                "Save it", "Don't save", "Stay here");
+            if (keep is null)
                 return false;
-            if (keep == MessageBoxResult.Yes)
+            if (keep == true)
             {
                 if (!SaveConfigDoc())
                     return false;
@@ -1595,11 +1550,11 @@ public partial class SettingsPage : UserControl
         if (!doc.Dirty)
             return true;
 
-        var save = MessageBox.Show(W, "The config has unsaved changes.\n\nSave them before going back?",
-                                   "Basalt UI", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-        if (save == MessageBoxResult.Cancel)
+        var save = Shell.Dialog.ConfirmThree(W, "Basalt UI", "The config has unsaved changes.\n\nSave them before going back?",
+                                             "Save it", "Don't save", "Stay here");
+        if (save is null)
             return false;
-        if (save != MessageBoxResult.Yes)
+        if (save == false)
         {
             FootText.Text = "changes left unsaved — coming back re-reads the file";
             return true;

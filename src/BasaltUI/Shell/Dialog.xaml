@@ -40,6 +40,8 @@
                         Visibility="Collapsed" Margin="0,0,8,0" />
                 <Button x:Name="CancelButton" Content="Cancel" Click="Cancel_Click" MinWidth="92"
                         IsCancel="True" Margin="0,0,8,0" />
+                <Button x:Name="NoButton" Content="Don't save" Click="No_Click" MinWidth="96"
+                        Visibility="Collapsed" Margin="0,0,8,0" />
                 <Button x:Name="ConfirmButton" Content="Continue" Click="Confirm_Click" MinWidth="92"
                         Style="{StaticResource AccentButton}" IsDefault="True" />
             </StackPanel>

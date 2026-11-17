@@ -50,26 +50,8 @@
                     <ColumnDefinition Width="8" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Grid>
                     <TextBox x:Name="QueryBox" KeyDown="Query_KeyDown" Padding="11,6,10,6"
                              AutomationProperties.Name="Search Hugging Face" />
-                    <!-- The visible label is SearchNote under this row; this only hints at what to type, so it
-                         never has to carry the meaning on its own. -->
-                    <TextBlock x:Name="QueryHint" Text="a name, a quant, “basalt”…" Margin="12,1,0,0"
-                               IsHitTestVisible="False" VerticalAlignment="Center"
-                               Foreground="{DynamicResource TextFaint}">
-                        <TextBlock.Style>
-                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource Label}">
-                                <Setter Property="Visibility" Value="Collapsed" />
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding Text, ElementName=QueryBox}" Value="">
-                                        <Setter Property="Visibility" Value="Visible" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
-                </Grid>
                 <Button x:Name="SearchButton" Grid.Column="2" Content="Search" Click="Search_Click"
                         Style="{StaticResource AccentButton}" MinWidth="84" MinHeight="34"
                         ToolTip="Ask Hugging Face for repos matching the phrase" />
@@ -130,21 +112,41 @@
                                                      Visibility="{Binding HasBadge, Converter={x:Static cv:BoolToVisibility.Instance}}"
                                                      ToolTip="{Binding Badge.Tip}" />
                                             <Border DockPanel.Dock="Right" Background="{DynamicResource AccentSoft}"
-                                                    CornerRadius="4" Padding="6,2" Margin="8,0,0,0"
+                                                    CornerRadius="4" Height="18" Padding="0" Margin="8,0,0,0"
+                                                    VerticalAlignment="Center"
                                                     Visibility="{Binding Official, Converter={x:Static cv:BoolToVisibility.Instance}}">
                                                 <TextBlock Text="official" FontSize="10.5" FontWeight="SemiBold"
-                                                           Foreground="{DynamicResource Accent}" />
+                                                           Foreground="{DynamicResource Accent}" VerticalAlignment="Center"
+                                                           Margin="7,-1,7,0" />
                                             </Border>
                                             <TextBlock DockPanel.Dock="Right" Text="{Binding LikeMark}"
-                                                       Style="{StaticResource Label}" VerticalAlignment="Top" />
+                                                       Style="{StaticResource Label}" VerticalAlignment="Center"
+                                                       Margin="8,0,0,0" />
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding DownloadMark}"
+                                                       Style="{StaticResource Label}" Foreground="{DynamicResource TextFaint}"
+                                                       VerticalAlignment="Center" Margin="8,0,0,0" />
                                             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
                                                        FontWeight="SemiBold" FontSize="12.5" />
                                         </DockPanel>
                                         <TextBlock Text="{Binding Owner}" Style="{StaticResource Label}"
                                                    TextTrimming="CharacterEllipsis" FontSize="11" />
-                                        <TextBlock Text="{Binding Facts}" Style="{StaticResource Label}"
-                                                   Foreground="{DynamicResource TextFaint}" FontSize="11"
-                                                   Margin="0,3,0,0" />
+                                        <ItemsControl ItemsSource="{Binding Tags}" Margin="0,5,0,0"
+                                                      Visibility="{Binding HasTags, Converter={x:Static cv:BoolToVisibility.Instance}}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Line}"
+                                                            BorderThickness="1" CornerRadius="4" Padding="6,1"
+                                                            Margin="0,0,5,4">
+                                                        <TextBlock Text="{Binding}" FontSize="10.5"
+                                                                   Foreground="{DynamicResource TextSecondary}"
+                                                                   VerticalAlignment="Center" />
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

@@ -66,11 +66,12 @@
                         shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <!-- the dashboard's actions -->
                 <StackPanel x:Name="MainActions" Orientation="Horizontal">
+                    <Button x:Name="ThemeButton" Click="Theme_Click" Margin="0,0,8,0"
+                            ToolTip="Switch between light and dark">
+                        <TextBlock x:Name="ThemeGlyph" Style="{StaticResource Icon}" FontSize="14" />
+                    </Button>
                     <Button Command="{Binding SettingsCommand}" Margin="0,0,2,0" ToolTip="Settings and raw config">
                         <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE713;" /><Run Text="  Settings" /></TextBlock>
-                    </Button>
-                    <Button Command="{Binding OpenWebUiCommand}" Margin="0,0,2,0" ToolTip="Open the engine's own web page">
-                        <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE774;" /><Run Text="  Web UI" /></TextBlock>
                     </Button>
                     <Button Command="{Binding RestartCommand}" Margin="0,0,10,0" ToolTip="Stop, then start again">
                         <TextBlock><Run FontFamily="{StaticResource FontIcon}" FontSize="13" Text="&#xE72C;" /><Run Text="  Restart" /></TextBlock>
@@ -362,10 +363,17 @@
                                                         </Style>
                                                     </TextBlock.Style>
                                                 </TextBlock>
-                                                <Button Grid.Column="2" Style="{StaticResource GhostButton}" Content="history"
-                                                        Click="History_Click" Tag="{Binding}" Margin="6,0,0,0"
-                                                        VerticalAlignment="Center"
-                                                        ToolTip="What this model actually ran at, session by session: the requests the app watched, and the gaps where it was away" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="6,0,0,0"
+                                    VerticalAlignment="Center">
+                            <Button Style="{StaticResource GhostButton}" Click="WebUi_Click" Tag="{Binding}"
+                                    Width="26" Padding="0" ToolTip="Open this model's web UI">
+                                <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE774;" />
+                            </Button>
+                            <Button Style="{StaticResource GhostButton}" Click="History_Click" Tag="{Binding}"
+                                    Width="26" Padding="0" ToolTip="This model's own run history">
+                                <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE81C;" />
+                            </Button>
+                        </StackPanel>
                                             </Grid>
                                             <TextBlock Text="{Binding Detail}" Style="{StaticResource Label}"
                                                        TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
@@ -404,7 +412,6 @@
                                     ToolTip="Every model on Hugging Face — the packs the basalt author publishes are pinned at the top" />
                         </DockPanel>
 
-                        <TextBlock Grid.Row="3" Text="{Binding ModelsFolderText}" Style="{StaticResource Label}"
                                    Foreground="{DynamicResource TextFaint}" Margin="0,10,0,0"
                                    TextTrimming="CharacterEllipsis" />
                     </Grid>

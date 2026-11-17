@@ -131,6 +131,10 @@ public sealed class AppSettings
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
+    // ---- appearance ---------------------------------------------------------------------------------------------
+    /// <summary>Null follows Windows; true or false is the side the user picked with the moon/sun button.</summary>
+    public bool? ThemeDark { get; set; }
+
     public string BasaltExePath { get; set; } = "";
     public string ConfigPath { get; set; } = "";
     public string ModelsFolder { get; set; } = "";

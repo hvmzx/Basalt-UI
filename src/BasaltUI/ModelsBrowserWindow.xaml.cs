@@ -27,7 +27,7 @@ public partial class ModelsBrowserWindow : Window
         InitializeComponent();
 
         SourceInitialized += (_, _) => Shell.Win11.Round(this, App.IsDarkTheme);
-        QueryBox.Text = "basalt";
+        QueryBox.Text = "";
         FolderText.Text = app.Settings.ModelsFolder;
         Loaded += (_, _) => _ = SearchAsync();
         app.Downloads.ItemChanged += OnTransferChanged;
@@ -411,18 +411,17 @@ public partial class ModelsBrowserWindow : Window
         {
             Repo = repo;
             Official = official;
-            LikeMark = official ? ""
-                       : repo.Private ? "needs an account"
-                       : repo.Likes > 0 ? "♥ " + repo.Likes
-                       : "";
+            LikeMark = repo.Private ? "needs an account" : "♥ " + repo.Likes;
         }
 
         public HfRepo Repo { get; }
         public bool Official { get; }
         public string Name => Repo.NameFirst;
         public string Owner => Repo.Owner;
-        public string Facts => Repo.FactsText;
+        public IReadOnlyList<string> Tags => Repo.FactTags;
+        public bool HasTags => Tags.Count > 0;
         public string LikeMark { get; }
+        public string DownloadMark => "↓ " + Repo.DownloadsText;
 
         /// <summary>
         /// The family mark to wear next to the name — by the name itself, or the owner when only the

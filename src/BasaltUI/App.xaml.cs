@@ -57,35 +57,48 @@ public partial class App : Application
     }
 
     // ---- theme ------------------------------------------------------------------------------------------
-    /// <summary>Which token file is merged. Windows' own apps setting decides, as the system apps do.</summary>
+    /// <summary>Which token file is merged: a persisted choice when one was made, else Windows' own setting.</summary>
     public static bool IsDarkTheme { get; private set; } = true;
 
-    /// <summary>
-    /// Follows Windows: Settings → Personalisation → Colours → "Choose your mode" for apps. Read before any
-    /// window is built, and never re-read — a restart picks up a change, which is what most settings-bearing
-    /// apps do and what keeps the tray, the balloon and the windows in agreement.
-    /// </summary>
+    /// <summary>Follows Windows until the user picks a side with the moon/sun button; the choice then sticks.</summary>
     private void PickTheme()
     {
-        IsDarkTheme = true;
-        try
+        var dark = Settings.ThemeDark;
+        if (dark is null)
         {
-            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
-                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
-            if (key?.GetValue("AppsUseLightTheme") is int light)
-                IsDarkTheme = light == 0;
+            dark = true;
+            try
+            {
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+                if (key?.GetValue("AppsUseLightTheme") is int light)
+                    dark = light == 0;
+            }
+            catch
+            {
+                // an unreadable registry is not worth a dialog; dark is the default
+            }
         }
-        catch
-        {
-            // an unreadable registry is not worth a dialog; dark is the default
-        }
+        ApplyTheme(dark.Value);
+    }
 
+    private void ApplyTheme(bool dark)
+    {
+        IsDarkTheme = dark;
         Resources.MergedDictionaries[0] = new ResourceDictionary
         {
-            Source = new Uri(IsDarkTheme
+            Source = new Uri(dark
                 ? "pack://application:,,,/Themes/Dark.xaml"
                 : "pack://application:,,,/Themes/Light.xaml"),
         };
+    }
+
+    /// <summary>The main page's moon/sun: flip the tokens at runtime and remember the choice.</summary>
+    public void ToggleTheme()
+    {
+        Settings.ThemeDark = !IsDarkTheme;
+        Settings.Save();
+        ApplyTheme(Settings.ThemeDark.Value);
     }
 
     // ---- startup ------------------------------------------------------------------------------------------
@@ -101,9 +114,8 @@ public partial class App : Application
             if (!WakeOtherInstance())
             {
                 AppPaths.Log("another copy was already running, with no window on screen to raise");
-                MessageBox.Show("Basalt UI is already running — its icon is by the clock, in the tray.\n\n" +
-                                "Use that one rather than a second copy.",
-                                "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Information);
+                Shell.Dialog.Info(null, "Basalt UI", "Basalt UI is already running — its icon is by the clock, in the tray.\n\n" +
+                                                "Use that one rather than a second copy.");
             }
 
             Shutdown();
@@ -319,10 +331,9 @@ public partial class App : Application
         var stopServer = Settings.StopServerOnAppExit && Server.IsAlive;
         if (stopServer)
         {
-            var answer = MessageBox.Show(window,
+            stopServer = Shell.Dialog.Confirm(window, "Quit Basalt UI",
                 "Basalt is still serving models.\n\nStop it, or leave it running and just close this window?",
-                "Quit Basalt UI", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.Yes);
-            stopServer = answer == MessageBoxResult.Yes;
+                "Stop and quit", "Leave it running");
         }
 
         exiting = true;
@@ -425,8 +436,7 @@ public partial class App : Application
             ? "The whole message is in\n" + AppPaths.LogFile
             : "It cannot write its own files either, so the log may be empty:\n" + AppPaths.Trouble;
 
-        MessageBox.Show($"Basalt UI hit a problem and skipped it.\n\n{message}\n\n" + where,
-                        "Basalt UI", MessageBoxButton.OK, MessageBoxImage.Error);
+        Shell.Dialog.Info(null, "Basalt UI", $"Basalt UI hit a problem and skipped it.\n\n{message}\n\n" + where);
     }
 
     // ---- single instance ---------------------------------------------------------------------------------

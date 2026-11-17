@@ -16,15 +16,18 @@ public sealed record HfRepo(string Id, long Downloads, int Likes, DateTime? Upda
     public string UpdatedText => Updated is { } at ? at.ToLocalTime().ToString("yyyy-MM-dd") : "";
 
     /// <summary>The tags that say what the file is made of, without listing every label there is.</summary>
-    public string FactsText
+    public IReadOnlyList<string> FactTags => [.. Tags.Where(t => t.Length > 0 && !Boring.Contains(t) && !t.Contains(':'))
+                                                   .Take(4)];
+
+    public string FactsText => string.Join("  ", FactTags);
+
+    /// <summary>Downloads in the short form Hugging Face itself uses.</summary>
+    public string DownloadsText => Downloads switch
     {
-        get
-        {
-            var keep = Tags.Where(t => t.Length > 0 && !Boring.Contains(t) && !t.Contains(':'))
-                           .Take(4);
-            return string.Join("  ", keep);
-        }
-    }
+        >= 1_000_000 => $"{Downloads / 1_000_000.0:0.#}M",
+        >= 1_000 => $"{Downloads / 1_000.0:0.#}k",
+        _ => Downloads.ToString(),
+    };
 
     private static readonly HashSet<string> Boring = new(StringComparer.OrdinalIgnoreCase)
     {

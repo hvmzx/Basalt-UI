@@ -12,6 +12,8 @@ namespace BasaltUI.Shell;
 public partial class Dialog : Window
 {
     private bool confirmed;
+    private bool declined;
+    private bool threeWay;
     private Action? details;
 
     private Dialog(Window owner, string title, string message, string confirm, string cancel)
@@ -60,6 +62,18 @@ public partial class Dialog : Window
         return box.confirmed;
     }
 
+    /// <summary>A three-way question: yes, no, or step back. Null is the step back.</summary>
+    public static bool? ConfirmThree(Window? owner, string title, string message,
+                                     string yes, string no, string cancel)
+    {
+        var box = new Dialog(OwnerOr(owner), title, message, yes, cancel);
+        box.NoButton.Content = no;
+        box.NoButton.Visibility = Visibility.Visible;
+        box.threeWay = true;
+        box.ShowDialog();
+        return box.confirmed ? true : box.declined ? false : null;
+    }
+
     /// <summary>One button, one fact.</summary>
     public static void Info(Window? owner, string title, string message)
     {
@@ -77,6 +91,12 @@ public partial class Dialog : Window
     private void Confirm_Click(object sender, RoutedEventArgs e)
     {
         confirmed = true;
+        Close();
+    }
+
+    private void No_Click(object sender, RoutedEventArgs e)
+    {
+        declined = true;
         Close();
     }
 
