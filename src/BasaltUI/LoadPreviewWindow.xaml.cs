@@ -5,14 +5,16 @@ using BasaltUI.Core;
 namespace BasaltUI;
 
 /// <summary>
-/// A config's load preview, as three bars per model and one set of totals for the whole config —
-/// the split the files describe and the memory that is free right now, without a paragraph per model.
+/// A config's load preview, as three bars per model and one set of totals for the whole config. The
+/// window stays open while other configs are selected and re-measures itself for each one.
 /// </summary>
 public partial class LoadPreviewWindow : Window
 {
     private sealed record TierRow(string Name, double VramFraction, string VramText,
                                   double RamFraction, string RamText,
                                   double SsdFraction, string SsdText);
+
+    public static LoadPreviewWindow? Current { get; private set; }
 
     public double TotalVramFraction { get; private set; }
     public string TotalVramText { get; private set; } = "";
@@ -21,23 +23,37 @@ public partial class LoadPreviewWindow : Window
     public double TotalSsdFraction { get; private set; }
     public string TotalSsdText { get; private set; } = "";
 
-    public LoadPreviewWindow() => InitializeComponent();
+    public LoadPreviewWindow()
+    {
+        InitializeComponent();
+        SourceInitialized += (_, _) => Shell.Win11.Round(this, App.IsDarkTheme);
+        Closed += (_, _) => { if (Current == this) Current = null; };
+    }
 
     public static async Task ShowAsync(Window owner, string name, IReadOnlyList<LoadPreview.Options> models)
     {
-        var window = new LoadPreviewWindow { Owner = owner };
+        var window = Current ?? new LoadPreviewWindow { Owner = owner };
+        Current = window;
         window.TitleText.Text = "Preview — " + name;
         window.Verdict.Text = "measuring " + models.Count + " model" + (models.Count == 1 ? "" : "s") + "…";
-        window.Show();
+        if (!window.IsVisible)
+            window.Show();
+        await window.UpdateFor(name, models);
+    }
 
+    /// <summary>Re-measure for a different selection while the window is already open.</summary>
+    public async Task UpdateFor(string name, IReadOnlyList<LoadPreview.Options> models)
+    {
+        TitleText.Text = "Preview — " + name;
+        Verdict.Text = "measuring…";
         try
         {
             var plans = await Task.Run(() => models.Select(m => LoadPreview.ForFile(m.Name, m)).ToList());
-            window.Render(models, plans);
+            Render(models, plans);
         }
         catch (System.Exception e)
         {
-            window.Verdict.Text = "The preview could not be measured:\n\n" + e.Message;
+            Verdict.Text = "The preview could not be measured:\n\n" + e.Message;
         }
     }
 
@@ -45,40 +61,46 @@ public partial class LoadPreviewWindow : Window
     {
         var bytes = BasaltLocator.HumanBytes;
         var hardware = plans.FirstOrDefault(p => p.Hardware is not null)?.Hardware;
-        var vramTotal = hardware?.VramTotal ?? 0;
-        var ramTotal = hardware?.RamTotal ?? 0;
+        // What is actually free now, not the card's total: a tier cannot use more than exists, and
+        // whatever does not fit goes to the SSD rather than pretending RAM or VRAM grew.
+        var vramRoom = hardware?.VramFree ?? 0;
+        var ramRoom = hardware?.RamFree ?? 0;
 
         var rows = new List<TierRow>();
-        long vram = 0, ram = 0, ssd = 0;
+        long vram = 0, ram = 0, ssd = 0, files = 0;
         for (var i = 0; i < plans.Count; i++)
         {
             var tier = plans[i].Tiers ?? new LoadPreview.Tiers(0, 0, 0, 0);
-            vram += tier.Vram;
-            ram += tier.Ram;
-            ssd += tier.Ssd;
+            var v = System.Math.Min(tier.Vram, vramRoom);
+            var r = System.Math.Min(tier.Ram, ramRoom);
+            var s = tier.Ssd + (tier.Vram - v) + (tier.Ram - r);
+            vram += v;
+            ram += r;
+            ssd += s;
+            files += tier.Total;
             rows.Add(new TierRow(Path.GetFileName(models[i].Name),
-                vramTotal > 0 ? (double)tier.Vram / vramTotal : 0,
-                bytes(tier.Vram) + (vramTotal > 0 ? " of " + bytes(vramTotal) : ""),
-                ramTotal > 0 ? (double)tier.Ram / ramTotal : 0,
-                bytes(tier.Ram) + (ramTotal > 0 ? " of " + bytes(ramTotal) : ""),
-                tier.Total > 0 ? (double)tier.Ssd / tier.Total : 0,
-                bytes(tier.Ssd) + " of the " + bytes(tier.Total) + " file"));
+                vramRoom > 0 ? (double)v / vramRoom : 0,
+                bytes(v) + " of " + bytes(vramRoom) + " free",
+                ramRoom > 0 ? (double)r / ramRoom : 0,
+                bytes(r) + " of " + bytes(ramRoom) + " free",
+                tier.Total > 0 ? (double)s / tier.Total : 0,
+                bytes(s) + (s > 0 ? " of the file streams from SSD" : " — all in memory")));
         }
         ModelRows.ItemsSource = rows;
 
-        TotalVramFraction = vramTotal > 0 ? (double)vram / vramTotal : 0;
-        TotalVramText = bytes(vram) + (vramTotal > 0 ? " of " + bytes(vramTotal) : " (GPU not measured)");
-        TotalRamFraction = ramTotal > 0 ? (double)ram / ramTotal : 0;
-        TotalRamText = bytes(ram) + (ramTotal > 0 ? " of " + bytes(ramTotal) : "");
-        TotalSsdFraction = vram + ram > 0 ? (double)ssd / (vram + ram + ssd) : 0;
+        TotalVramFraction = vramRoom > 0 ? (double)vram / vramRoom : 0;
+        TotalVramText = bytes(vram) + " of " + bytes(vramRoom) + " free";
+        TotalRamFraction = ramRoom > 0 ? (double)ram / ramRoom : 0;
+        TotalRamText = bytes(ram) + " of " + bytes(ramRoom) + " free";
+        TotalSsdFraction = files > 0 ? (double)ssd / files : 0;
         TotalSsdText = bytes(ssd) + (ssd > 0 ? " streams on demand" : " — everything fits in memory");
         DataContext = this;
 
         Verdict.Text = hardware is null || !hardware.VramKnown
-            ? "Nothing reported the GPU — the memory bars show the files' own sizes, not a fit."
-            : vram > hardware.VramFree
-                ? $"About {bytes(vram - hardware.VramFree)} more VRAM than is free right now — the engine will tier more experts into RAM or stream them."
-                : "Fits in the VRAM free right now, experts included.";
+            ? "Nothing reported the GPU — the bars show the files' own sizes, not a fit."
+            : ssd > 0
+                ? $"About {bytes(ssd)} would stream from the SSD — replies slow down when experts are read from there."
+                : "Everything fits in the VRAM and RAM free right now, experts included.";
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

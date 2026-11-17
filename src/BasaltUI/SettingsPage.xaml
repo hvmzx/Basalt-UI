@@ -33,11 +33,6 @@
 
         <!-- ============ which file we are editing, and whether it has changed ============ -->
         <DockPanel x:Name="SettingsHeader" Grid.Row="0" LastChildFill="False" Margin="20,0,20,0" Background="Transparent">
-            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock x:Name="PathText" Text="config" Style="{StaticResource Mono}"
-                           Foreground="{DynamicResource TextFaint}" VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis" MaxWidth="560" />
-            </StackPanel>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock x:Name="DirtyText" Text="" Foreground="{DynamicResource Warn}"
                            VerticalAlignment="Center" Margin="0,0,12,0" />
@@ -48,10 +43,7 @@
         </DockPanel>
 
         <!-- ============ the tabs ============ -->
-        <TabControl Grid.Row="1" x:Name="Tabs" SelectionChanged="Tabs_SelectionChanged" Margin="20,0,20,0">
-            <TabItem Header="Basalt" />
-            <TabItem Header="Configs" />
-        </TabControl>
+        <TabControl Grid.Row="1" x:Name="Tabs" Visibility="Collapsed" Margin="20,0,20,0" />
 
         <!-- ============ the tab pages, kept out of the TabControl so the tab strip stays a hairline strip ============ -->
         <Grid Grid.Row="2" Margin="20,0,20,0">
@@ -306,15 +298,17 @@
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="config file" Style="{StaticResource Label}" VerticalAlignment="Center" />
                                 <TextBox x:Name="ProfileFileBox" Grid.Column="1" Margin="0,0,8,0"
                                          LostFocus="ProfileFile_LostFocus" />
-                                <Button Grid.Column="2" Content="Browse…" Click="ProfileBrowse_Click" Margin="0,0,8,0" />
+                                <Button Grid.Column="2" Content="Browseâ€¦" Click="ProfileBrowse_Click" Margin="0,0,8,0" />
                                 <TextBlock Grid.Column="3" x:Name="ProfileState" Style="{StaticResource Label}"
                                            VerticalAlignment="Center" TextWrapping="Wrap" />
-                            </Grid>
-                            <Grid Margin="0,3,0,0">
+                                <Button Grid.Column="4" x:Name="ConfigPreviewButton" Content="Preview"
+                                        Click="PreviewButton_Click" Margin="8,0,0,0" />
+                            </Grid>                            <Grid Margin="0,3,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="110" />
                                     <ColumnDefinition Width="*" />
@@ -331,12 +325,6 @@
                             <DockPanel Margin="0,8,0,0" LastChildFill="False">
                                 <CheckBox x:Name="ProfileStartCheck" Content="Start this config when Basalt UI opens"
                                           Checked="ProfileStart_Changed" Unchecked="ProfileStart_Changed" />
-                                <Button DockPanel.Dock="Right" x:Name="ConfigPreviewButton" Content="Preview the whole config…"
-                                        Click="PreviewButton_Click" Margin="0,0,8,0"
-                                        ToolTip="How all the models in this config would sit in VRAM, RAM and on the SSD" />
-                                <TextBlock DockPanel.Dock="Right" x:Name="ProfileCommand" Style="{StaticResource Mono}"
-                                           Foreground="{DynamicResource TextFaint}" TextTrimming="CharacterEllipsis"
-                                           ToolTip="The command this config is launched with" />
                             </DockPanel>
                         </StackPanel>
                     </Border>

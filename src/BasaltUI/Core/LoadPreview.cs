@@ -55,7 +55,7 @@ public static class LoadPreview
 
     public sealed record Options(string Name, long FileBytes, string? Kv, long MaxContext, long Parallel,
                                  string? Vision, bool ResidentExperts, int GpuIndex, string? DiskRoot,
-                                 long KvResidentCells = 0);
+                                 long KvResidentCells = 0, long RamReserveMib = 2048, long VramReserveMib = 700);
 
     /// <summary>The byte split a preview settled on, so a window can draw it as three bars instead of a
     /// paragraph. Ssd is what still has to stream from the file; Total is the model's own size.</summary>
@@ -132,14 +132,14 @@ public static class LoadPreview
                        (o.Vision is { Length: > 0 } || visionBytes > 0);
         var visionTotal = visionOn ? visionBytes + (IsDynamicVision(o.Vision, visionBytes) ? VisionWorkingBytes : 0) : 0;
 
-        var vramBudget = hw.VramKnown ? Math.Max(0, hw.VramFree - VramReserveBytes) : 0;
+        var vramBudget = hw.VramKnown ? Math.Max(0, hw.VramFree - o.VramReserveMib * Mib) : 0;
         var fixedVram = kvInVram + dense + visionTotal;
         var roomInVram = Math.Max(0, vramBudget - fixedVram);
         var expertsInVram = Math.Min(experts, roomInVram);
         var rest = experts - expertsInVram;
 
         // Page-locked experts, then the room the file cache keeps for itself when some of them stay on disk.
-        var ramBudget = o.ResidentExperts ? Math.Max(0, hw.RamFree - RamReserveBytes - kvInRam) : 0;
+        var ramBudget = o.ResidentExperts ? Math.Max(0, hw.RamFree - o.RamReserveMib * Mib - kvInRam) : 0;
         var expertsInRam = Math.Min(rest, ramBudget);
         if (expertsInRam < rest)
         {

@@ -572,26 +572,17 @@ public sealed class MainViewModel : ObservableObject
     /// The bottom-left corner: which basalt this machine runs, green dot when that is the newest release,
     /// yellow when something newer is out — and the whole thing is the update button.
     /// </summary>
-    public string EngineVersionLabel
-    {
-        get
-        {
-            var here = InstalledVersionText;
-            return here.Length == 0 ? "basalt — version unknown" : "basalt " + here;
-        }
-    }
+    /// <summary>True when there is no basalt.exe where the app expects it: the footer then offers the download.</summary>
+    public bool BasaltMissing => string.IsNullOrWhiteSpace(Settings.BasaltExePath) || !File.Exists(Settings.BasaltExePath);
 
-    public string UpdateDotTip
-    {
-        get
-        {
-            if (checkingUpdate)
-                return "looking for a newer basalt…";
-            if (Latest is { } release && UpdateChecker.Compare(InstalledVersionText, release) > 0)
-                return $"basalt {release.Tag} is out — click to install it";
-            return "click to check for a newer basalt";
-        }
-    }
+    public string EngineVersionLabel => BasaltMissing
+        ? "Basalt not installed"
+        : InstalledVersionText.Length == 0 ? "basalt — version unknown" : "basalt " + InstalledVersionText;
+
+    public string UpdateDotTip => BasaltMissing
+        ? "click to download and install basalt"
+        : InstalledVersionText.Length == 0 ? "click to check for a newer basalt"
+        : "basalt " + InstalledVersionText + " — click to check for updates";
 
     /// <summary>The banner. Nothing when there is nothing to say.</summary>
     public string UpdateText
@@ -760,6 +751,28 @@ public sealed class MainViewModel : ObservableObject
         if (between.Count == 0)
             text += "(no release notes were published between these versions)\n";
         return text;
+    }
+
+    /// <summary>Nothing installed yet: download the newest release straight into the app's own basalt folder
+    /// and remember that exe as the one every config is launched with.</summary>
+    public async Task<string?> InstallBasaltAsync()
+    {
+        var root = Path.Combine(AppPaths.Root, "basalt");
+        Directory.CreateDirectory(root);
+        Settings.BasaltExePath = Path.Combine(root, "bin", "basalt.exe");
+        Settings.Save();
+        if (Latest is null)
+        {
+            try
+            {
+                Latest = await UpdateChecker.LatestAsync(CancellationToken.None);
+            }
+            catch (Exception e)
+            {
+                return Net.Explain(e);
+            }
+        }
+        return await UpdateBasaltAsync();
     }
 
     /// <summary>
@@ -1880,6 +1893,24 @@ public sealed class MainViewModel : ObservableObject
         ReapplyPolling();                                   // the new config may listen on another port
         RebuildConfigCards();
         return null;
+    }
+
+    /// <summary>Load a whole config: write its document to its file, make it active, then start basalt with
+    /// that file — restarting the watched server when one is already running.</summary>
+    public async Task LoadConfigAsync(string name)
+    {
+        var error = ApplyProfile(name, null);
+        if (error is not null)
+        {
+            Notice?.Invoke($"Could not load config “{name}”: {error}");
+            Append("could not load config \"" + name + "\": " + error, LogSource.Error);
+            return;
+        }
+        if (process.IsAlive)
+            await RestartAsync(userDirected: true);
+        else
+            await StartAsync();
+        Append($"app: config \"{name}\" loaded", LogSource.App);
     }
 
     /// <summary>Makes the model named by <paramref name="frontFile"/> the first entry of

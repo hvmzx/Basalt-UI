@@ -267,6 +267,28 @@ public partial class MainWindow : Window
     // ---- the version dot ---------------------------------------------------------------------------------------
     private async void UpdateDot_Click(object sender, RoutedEventArgs e)
     {
+        if (Vm.BasaltMissing)
+        {
+            if (!Shell.Dialog.Confirm(this, "Basalt not installed",
+                    "Basalt UI manages configs but needs basalt itself to serve them.\n\n" +
+                    "Download and install the newest basalt into the app's own basalt folder?",
+                    "Download and install", "Not now"))
+                return;
+            UpdateButton.IsEnabled = false;
+            try
+            {
+                var error = await Vm.InstallBasaltAsync();
+                if (error.Length > 0)
+                    Shell.Dialog.Info(this, "Basalt UI", "Could not install basalt:\n\n" + error);
+                else
+                    app.Notify("basalt is installed — press Start to load a config");
+            }
+            finally
+            {
+                UpdateButton.IsEnabled = true;
+            }
+            return;
+        }
         // Green: the click is a manual check. Yellow: the click opens the update question.
         if (Vm.UpdateAvailable)
             await AskUpdateAsync();
@@ -392,19 +414,19 @@ public partial class MainWindow : Window
             RevealConfig(name);
     }
 
-    private void LoadConfigModel_Click(object sender, RoutedEventArgs e)
-    {
-        e.Handled = true;
-        if (sender is Button { Tag: MainViewModel.ConfigModelRow model })
-            _ = Vm.SwitchModelAsync(model.Id);
-    }
-
     /// <summary>The web UI belongs to the config, not to one of its models.</summary>
     private void ConfigWebUi_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
         if (sender is Button { Tag: string name })
             Vm.OpenWebUiFor(name);
+    }
+
+    private void LoadConfig_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { Tag: string name })
+            _ = Vm.LoadConfigAsync(name);
     }
 
     private void HistoryModel_Click(object sender, RoutedEventArgs e)

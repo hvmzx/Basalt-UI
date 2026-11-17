@@ -41,7 +41,7 @@ public partial class SettingsPage : UserControl
     private bool ready;
     private bool rebuilding;
     private bool committing;
-    private bool wasOnConfigs;
+    private bool configsMode;
 
     /// <summary>
     /// The document the fields are working on: the real file everywhere except the Configs tab, where it
@@ -96,14 +96,14 @@ public partial class SettingsPage : UserControl
     /// page. Only the page content differs — the tab strip and the settings chrome are hidden in configs mode.</summary>
     public void SetMode(bool configs)
     {
+        configsMode = configs;
         var rows = ((Grid)Content).RowDefinitions;
-        rows[0].Height = new GridLength(configs ? 0 : 44);
-        rows[1].Height = new GridLength(configs ? 0 : 1, GridUnitType.Auto);
-        rows[3].Height = new GridLength(configs ? 0 : 1, GridUnitType.Auto);
-        Tabs.Visibility = configs ? Visibility.Collapsed : Visibility.Visible;
-        SettingsHeader.Visibility = configs ? Visibility.Collapsed : Visibility.Visible;
-        SettingsFooter.Visibility = configs ? Visibility.Collapsed : Visibility.Visible;
-        Tabs.SelectedIndex = configs ? 1 : 0;
+        rows[0].Height = new GridLength(configs ? 44 : 0);
+        rows[1].Height = new GridLength(0);             // no tab strip in either page
+        rows[3].Height = new GridLength(configs ? 1 : 0, GridUnitType.Auto);
+        SettingsHeader.Visibility = configs ? Visibility.Visible : Visibility.Collapsed;
+        SettingsFooter.Visibility = configs ? Visibility.Visible : Visibility.Collapsed;
+        ShowTab();
         if (configs && profileName is null && app.Vm.Profiles.Names.Count > 0)
             RebuildProfiles(app.Vm.Profiles.Names[0]);
     }
@@ -151,11 +151,7 @@ public partial class SettingsPage : UserControl
         return "";
     }
 
-    private void RebuildEverything()
-    {
-        PathText.Text = OnConfigsTab ? "" : doc.FilePath;
-        RebuildCurrentPage();
-    }
+    private void RebuildEverything() => RebuildCurrentPage();
 
     private string NoteForServer() => ConfigDocument.ThisPcOnly(doc.Host)
         ? $"http://{doc.Host}:{doc.Port} — reachable from this machine only."
@@ -387,7 +383,6 @@ public partial class SettingsPage : UserControl
     /// <summary>The Configs tab with one config selected — what a model row's right-click asks for.</summary>
     public void RevealProfile(string name)
     {
-        Tabs.SelectedIndex = 1;             // the Configs tab — SelectionChanged loads the config's document
         RebuildProfiles(name);
         if (ProfilesList.ItemContainerGenerator.ContainerFromIndex(ProfilesList.SelectedIndex) is ListBoxItem item)
             item.BringIntoView();
@@ -413,6 +408,7 @@ public partial class SettingsPage : UserControl
         }
         ShowProfileState();
         RebuildEverything();
+        RefreshOpenPreview();
     }
 
     private void ProfilesList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -425,6 +421,17 @@ public partial class SettingsPage : UserControl
         LoadConfigDoc();
         ShowProfileState();
         RebuildEverything();
+        RefreshOpenPreview();
+    }
+
+    /// <summary>An open preview follows the config selected in the list instead of going stale.</summary>
+    private void RefreshOpenPreview()
+    {
+        if (LoadPreviewWindow.Current is null || profileName is null)
+            return;
+        var options = PreviewOptionsFor(profileName);
+        if (options.Count > 0)
+            _ = LoadPreviewWindow.Current.UpdateFor(profileName, options);
     }
 
     /// <summary>The selected config's document, as a scratch document the editors can work on.</summary>
@@ -503,23 +510,8 @@ public partial class SettingsPage : UserControl
         ProfileKeyBox.Password = name is null ? "" : app.Vm.Profiles.ApiKey(name);
         ProfileArgsBox.Text = name is null ? "" : app.Vm.Profiles.ExtraArgs(name);
         ProfileStartCheck.IsChecked = name is not null && app.Vm.Profiles.StartsOnLaunch(name);
-        var exe = string.IsNullOrWhiteSpace(S.BasaltExePath) ? "basalt.exe" : Path.GetFileName(S.BasaltExePath);
-        var file = name is null ? "" : app.Vm.Profiles.FilePath(name) ?? "";
-        var line = $"{exe} serve --config {LaunchSpec.Quote(file)}";
-        if (!string.IsNullOrWhiteSpace(ProfileKeyBox.Password))
-            line += " --api-key •••••";
-        if (!string.IsNullOrWhiteSpace(ProfileArgsBox.Text))
-            line += " " + ProfileArgsBox.Text.Trim();
-        ProfileCommand.Text = name is null ? "" : line;
-
-        if (name is null)
-        {
-            ProfileState.Text = "";
-            return;
-        }
-        ProfileState.Text = app.Vm.Profiles.Active == name
-            ? "● active — the config file carries this one"
-            : "not in the file — a model attaching it applies it";
+        ProfileState.Text = name is not null && app.Vm.Profiles.Active == name
+            ? "● active" : "";
     }
 
     /// <summary>The launch words belong to the config, not to the app: they travel with it in the store.</summary>
@@ -691,7 +683,7 @@ public partial class SettingsPage : UserControl
 
     /// <summary>True while the main tab strip sits on Configs: the doc property points at the selected
     /// config's document, and saving means the store rather than the file.</summary>
-    private bool OnConfigsTab => (Tabs.SelectedItem as TabItem)?.Header?.ToString() == "Configs";
+    private bool OnConfigsTab => configsMode;
 
     // ---- the load preview ------------------------------------------------------------------------------------
     // ---- the load preview, on demand --------------------------------------------------------------------------
@@ -700,27 +692,7 @@ public partial class SettingsPage : UserControl
     {
         if (profileName is null)
             return;
-        var document = app.Vm.Profiles.Document(profileName);
-        if (document is null)
-            return;
-        var engine = document["engine"] as JsonObject ?? [];
-        var options = new List<LoadPreview.Options>();
-        foreach (var node in (document["models"] as JsonArray ?? []).OfType<JsonObject>())
-        {
-            var path = ResolveModelFile(ConfigDocument.Text(node, "model") ?? "");
-            if (path is null)
-                continue;
-            options.Add(new LoadPreview.Options(
-                path, new FileInfo(path).Length,
-                ConfigDocument.Text(node, "kv"),
-                ConfigDocument.Int(node, "max-context") ?? 0,
-                ConfigDocument.Int(node, "parallel") ?? 1,
-                ConfigDocument.Text(node, "vision"),
-                ConfigDocument.Switch(engine, "resident-experts") != false,
-                int.TryParse(ConfigDocument.Text(node, "gpu"), out var gpu) ? Math.Max(0, gpu) : 0,
-                S.ModelsFolder,
-                ConfigDocument.Int(engine, "kv-resident") ?? 0));
-        }
+        var options = PreviewOptionsFor(profileName);
         if (options.Count == 0)
         {
             Shell.Dialog.Info(W, "Load preview", "None of this config's model files could be found on disk.");
@@ -735,6 +707,36 @@ public partial class SettingsPage : UserControl
         {
             ConfigPreviewButton.IsEnabled = true;
         }
+    }
+
+    /// <summary>The options for every model in a config, from the document being edited; the engine's
+    /// own reserve settings are honoured so the RAM tier is the one this config would actually use.</summary>
+    private IReadOnlyList<LoadPreview.Options> PreviewOptionsFor(string name)
+    {
+        var document = name == profileName ? configDoc.Root : app.Vm.Profiles.Document(name);
+        if (document is null)
+            return [];
+        var engine = document["engine"] as JsonObject ?? [];
+        var list = new List<LoadPreview.Options>();
+        foreach (var node in (document["models"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var path = ResolveModelFile(ConfigDocument.Text(node, "model") ?? "");
+            if (path is null)
+                continue;
+            list.Add(new LoadPreview.Options(
+                path, new FileInfo(path).Length,
+                ConfigDocument.Text(node, "kv"),
+                ConfigDocument.Int(node, "max-context") ?? 0,
+                ConfigDocument.Int(node, "parallel") ?? 1,
+                ConfigDocument.Text(node, "vision"),
+                ConfigDocument.Switch(engine, "resident-experts") != false,
+                int.TryParse(ConfigDocument.Text(node, "gpu"), out var gpu) ? Math.Max(0, gpu) : 0,
+                S.ModelsFolder,
+                ConfigDocument.Int(engine, "kv-resident") ?? 0,
+                ConfigDocument.Int(engine, "ram-reserve-mib") ?? 2048,
+                ConfigDocument.Int(engine, "vram-reserve-mib") ?? 700));
+        }
+        return list;
     }
 
     private string? ResolveModelFile(string wanted)
@@ -1413,45 +1415,10 @@ public partial class SettingsPage : UserControl
         ConfigPageRaw.Visibility = index == 3 ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        // the tab strip is a hairline strip; the pages live beside it and this flips which one shows
-        var leaving = wasOnConfigs;
-        wasOnConfigs = OnConfigsTab;
-        ShowTab();
-        if (!ready)
-            return;
-        if (leaving && !wasOnConfigs)
-        {
-            // leaving the configs: what was typed into the config is kept in the store first — and when
-            // the config is the active one, the file was rewritten with it, so the file tabs re-read it
-            var applied = configDoc.Dirty && app.Vm.Profiles.Active == profileName;
-            if (configDoc.Dirty)
-                PersistConfigDoc(apply: true);
-            if (applied)
-                fileDoc = OpenDoc(S.ConfigPath);
-            RebuildCurrentPage();       // the tabs being entered show the document they edit, as it now is
-        }
-        else if (!leaving && wasOnConfigs)
-        {
-            if (profileName is null && app.Vm.Profiles.Names.Count > 0)
-                RebuildProfiles(app.Vm.Profiles.Names[0]);   // first visit: the first config is as good a place to start as any
-            else
-            {
-                LoadConfigDoc();        // entering the configs: the selected config's own document
-                RebuildEverything();
-            }
-        }
-        UpdateDirty();
-    }
-
     private void ShowTab()
     {
-        var index = Tabs.SelectedIndex;
-        PageBasalt.Visibility = index == 0 ? Visibility.Visible : Visibility.Collapsed;
-        PageConfigs.Visibility = index == 1 ? Visibility.Visible : Visibility.Collapsed;
-        // Models, Server, Engine and Raw JSON are not pages of this tab strip any more — they are
-        // sub-tabs of the selected config, where they belong.
+        PageBasalt.Visibility = configsMode ? Visibility.Collapsed : Visibility.Visible;
+        PageConfigs.Visibility = configsMode ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---- saving --------------------------------------------------------------------------------------------
