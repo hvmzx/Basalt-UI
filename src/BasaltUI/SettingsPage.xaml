@@ -6,12 +6,22 @@
 <UserControl x:Class="BasaltUI.SettingsPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:cv="clr-namespace:BasaltUI.Converters"
+             xmlns:cv="clr-namespace:BasaltUI.Converters" xmlns:c="clr-namespace:BasaltUI.Controls"
              Background="{x:Null}"
              Foreground="{StaticResource TextPrimary}"
              FontFamily="{StaticResource FontText}" FontSize="13"
              UseLayoutRounding="True"
              TextOptions.TextFormattingMode="Display">
+
+    <UserControl.Resources>
+        <!-- the small actions that live on a row rather than in a toolbar: a glyph, no words -->
+        <Style x:Key="RowIconButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="2,0,0,0" />
+        </Style>
+    </UserControl.Resources>
 
     <Grid>
         <Grid.RowDefinitions>
@@ -43,7 +53,7 @@
             <TabItem Header="Models" />
             <TabItem Header="Configs" />
             <TabItem Header="Server" />
-            <TabItem Header="Engine defaults" />
+            <TabItem Header="Engine" />
             <TabItem Header="Raw JSON" />
         </TabControl>
 
@@ -238,22 +248,37 @@
 
                 <DockPanel Grid.Column="0" Margin="0,16,0,16">
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="Add" HorizontalAlignment="Stretch" Click="AddModel_Click" />
-                            <Button Grid.Column="2" Content="Duplicate" HorizontalAlignment="Stretch" Click="DuplicateModel_Click" />
-                        </Grid>
-                        <Button Content="Remove" Margin="0,8,0,0" HorizontalAlignment="Stretch" Click="RemoveModel_Click" />
-                        <Button Content="Find models on Hugging Face…" HorizontalAlignment="Stretch"
-                                Margin="0,12,0,0" Click="FindModels_Click" />
+                        <Button Content="Find models on Hugging Face…" HorizontalAlignment="Stretch" Click="FindModels_Click" />
                     </StackPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="models in this config" Style="{StaticResource Label}"
-                               Margin="0,0,0,8" />
-                    <ListBox x:Name="ModelsList" SelectionChanged="ModelsList_SelectionChanged" />
+                    <DockPanel DockPanel.Dock="Top" LastChildFill="False" Margin="0,0,0,8">
+                        <TextBlock Text="models in this config" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right" Style="{StaticResource RowIconButton}" Click="AddModel_Click"
+                                ToolTip="Add a model to this config">
+                            <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE710;" />
+                        </Button>
+                    </DockPanel>
+                    <ListBox x:Name="ModelsList" SelectionChanged="ModelsList_SelectionChanged">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="2,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <c:Badge Grid.Column="0" Width="18" Height="18" Margin="0,0,7,0"
+                                             VerticalAlignment="Center" Identity="{Binding Badge}"
+                                             Visibility="{Binding BadgeVisibility}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}" />
+                                    <Button Grid.Column="2" Style="{StaticResource RowIconButton}"
+                                            Click="RemoveModelIcon_Click" ToolTip="Remove this model from the config">
+                                        <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE74D;" />
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </DockPanel>
 
                 <DockPanel Grid.Column="2" Margin="0,16,0,16">
@@ -295,20 +320,43 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <DockPanel Grid.Column="0" Margin="0,16,0,16">
-                    <StackPanel DockPanel.Dock="Bottom">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="8" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="Add" HorizontalAlignment="Stretch" Click="AddProfile_Click" />
-                            <Button Grid.Column="2" Content="Duplicate" HorizontalAlignment="Stretch" Click="DuplicateProfile_Click" />
-                        </Grid>
-                        <Button Content="Remove" Margin="0,8,0,0" HorizontalAlignment="Stretch" Click="RemoveProfile_Click" />
-                    </StackPanel>
-                    <TextBlock DockPanel.Dock="Top" Text="named configs" Style="{StaticResource Label}" Margin="0,0,0,8" />
-                    <ListBox x:Name="ProfilesList" SelectionChanged="ProfilesList_SelectionChanged" />
+                    <DockPanel DockPanel.Dock="Top" LastChildFill="False" Margin="0,0,0,8">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource RowIconButton}"
+                                Click="AddProfile_Click" ToolTip="Add a config">
+                            <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE710;" />
+                        </Button>
+                    </DockPanel>
+                    <ListBox x:Name="ProfilesList" SelectionChanged="ProfilesList_SelectionChanged"
+                             MouseDoubleClick="ProfilesList_DoubleClick" PreviewMouseRightButtonDown="ProfilesList_RightDown">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="2,1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding}" VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis" ToolTip="{Binding}" />
+                                    <Button Grid.Column="1" Style="{StaticResource RowIconButton}"
+                                            Click="DuplicateProfileIcon_Click" ToolTip="Duplicate this config">
+                                        <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE8C8;" />
+                                    </Button>
+                                    <Button Grid.Column="2" Style="{StaticResource RowIconButton}"
+                                            Click="DeleteProfileIcon_Click" ToolTip="Delete this config">
+                                        <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE74D;" />
+                                    </Button>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Rename" Click="RenameProfile_Click" />
+                                <MenuItem Header="Duplicate" Click="DuplicateProfileMenuItem_Click" />
+                                <MenuItem Header="Delete" Click="DeleteProfileMenuItem_Click" />
+                            </ContextMenu>
+                        </ListBox.ContextMenu>
+                    </ListBox>
                 </DockPanel>
 
                 <Grid Grid.Column="2" Margin="0,16,0,16">
@@ -321,12 +369,8 @@
                     <Border Grid.Row="0" Style="{StaticResource Card}" Padding="14,10" Margin="0,0,0,10">
                         <StackPanel>
                             <DockPanel LastChildFill="False">
-                                <TextBlock DockPanel.Dock="Left" Text="name" Style="{StaticResource Label}"
-                                           VerticalAlignment="Center" Margin="0,0,10,0" />
-                                <TextBox x:Name="ProfileNameBox" Width="240" LostFocus="ProfileName_LostFocus" />
                                 <TextBlock DockPanel.Dock="Right" x:Name="ProfileState" Style="{StaticResource Label}"
-                                           VerticalAlignment="Center" Margin="14,0,0,0" TextWrapping="Wrap"
-                                           HorizontalAlignment="Right" />
+                                           VerticalAlignment="Center" TextWrapping="Wrap" HorizontalAlignment="Right" />
                             </DockPanel>
                             <TextBlock x:Name="ProfileAttached" Style="{StaticResource Label}"
                                        Foreground="{DynamicResource TextFaint}" Margin="0,8,0,0"
@@ -338,7 +382,7 @@
                     <TabControl Grid.Row="1" x:Name="ConfigTabs" SelectionChanged="ConfigTabs_SelectionChanged" Margin="0,0,0,0">
                         <TabItem Header="Models" />
                         <TabItem Header="Server" />
-                        <TabItem Header="Engine defaults" />
+                        <TabItem Header="Engine" />
                         <TabItem Header="Raw JSON" />
                     </TabControl>
 
@@ -351,21 +395,35 @@
                             </Grid.ColumnDefinitions>
 
                             <DockPanel Grid.Column="0" Margin="0,0,0,0">
-                                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="8" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <Button Grid.Column="0" Content="Add" HorizontalAlignment="Stretch" Click="AddModel_Click" />
-                                        <Button Grid.Column="2" Content="Duplicate" HorizontalAlignment="Stretch" Click="DuplicateModel_Click" />
-                                    </Grid>
-                                    <Button Content="Remove" Margin="0,8,0,0" HorizontalAlignment="Stretch" Click="RemoveModel_Click" />
-                                </StackPanel>
-                                <TextBlock DockPanel.Dock="Top" Text="models in this config" Style="{StaticResource Label}"
-                                           Margin="0,0,0,8" />
-                                <ListBox x:Name="ConfigModelsList" SelectionChanged="ConfigModelsList_SelectionChanged" />
+                                <DockPanel DockPanel.Dock="Top" LastChildFill="False" Margin="0,0,0,8">
+                                    <TextBlock Text="models in this config" Style="{StaticResource Label}" VerticalAlignment="Center" />
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource RowIconButton}" Click="AddModel_Click"
+                                            ToolTip="Add a model to this config">
+                                        <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE710;" />
+                                    </Button>
+                                </DockPanel>
+                                <ListBox x:Name="ConfigModelsList" SelectionChanged="ConfigModelsList_SelectionChanged">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="2,1">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <c:Badge Grid.Column="0" Width="18" Height="18" Margin="0,0,7,0"
+                                                         VerticalAlignment="Center" Identity="{Binding Badge}"
+                                                         Visibility="{Binding BadgeVisibility}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Label}" VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}" />
+                                                <Button Grid.Column="2" Style="{StaticResource RowIconButton}"
+                                                        Click="RemoveModelIcon_Click" ToolTip="Remove this model from the config">
+                                                    <TextBlock Style="{StaticResource Icon}" FontSize="12" Text="&#xE74D;" />
+                                                </Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </DockPanel>
 
                             <DockPanel Grid.Column="2" Margin="0,0,0,0">

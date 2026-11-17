@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using BasaltUI.Core;
 using Microsoft.Win32;
 
@@ -143,9 +144,7 @@ public partial class SettingsPage : UserControl
 
     private void RebuildEverything()
     {
-        PathText.Text = OnConfigsTab
-            ? $"config “{profileName ?? "?"}” — {ConfigProfiles.StorePath}"
-            : doc.FilePath;
+        PathText.Text = OnConfigsTab ? "" : doc.FilePath;
         RebuildCurrentPage();
     }
 
@@ -416,6 +415,15 @@ public partial class SettingsPage : UserControl
         ? (ConfigEntryFields, ConfigModelHint, ConfigAddFieldCombo)
         : (ModelFields, ModelHint, AddFieldCombo);
 
+    /// <summary>A model in one of the two lists: the family mark drawn beside its name, and the file name
+    /// the badge reads. Keeping both here means the list needs no converter to show a real logo.</summary>
+    private sealed record ModelListItem(string Label, string ModelFile)
+    {
+        public ModelIdentity.Identity? Badge => ModelIdentity.For(ModelFile);
+
+        public Visibility BadgeVisibility => Badge is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
     private void BuildModelList()
     {
         rebuilding = true;
@@ -423,7 +431,7 @@ public partial class SettingsPage : UserControl
         var keep = list.SelectedIndex;
         list.Items.Clear();
         foreach (var item in doc.ModelEntries())
-            list.Items.Add(LabelFor(item));
+            list.Items.Add(new ModelListItem(LabelFor(item), ConfigDocument.Text(item, "model") ?? ""));
         list.SelectedIndex = list.Items.Count == 0 ? -1 : Math.Clamp(keep, 0, list.Items.Count - 1);
         rebuilding = false;
 
@@ -622,24 +630,105 @@ public partial class SettingsPage : UserControl
 
     private void ShowProfileState()
     {
-        ProfileNameBox.Text = profileName ?? "";
-        ProfileNameBox.IsEnabled = profileName is not null;
         if (profileName is null)
         {
             ProfileState.Text = "";
-            ProfileAttached.Text = "no config selected — add one here, or make one from a model row's right-click";
+            ProfileAttached.Text = $"stored in {ConfigProfiles.StorePath}";
             return;
         }
         ProfileState.Text = app.Vm.Profiles.Active == profileName
             ? "● active — the config file carries this one"
             : "not in the file — a model attaching it applies it";
-        var wearing = app.Vm.Profiles.AttachedTo(profileName);
-        ProfileAttached.Text = wearing.Count == 0
-            ? "no model is assigned to it yet"
-            : "runs with: " + string.Join(", ", wearing);
+        ProfileAttached.Text = $"stored in {ConfigProfiles.StorePath}";
     }
 
-    private void AddProfile_Click(object sender, RoutedEventArgs e)
+    private void DuplicateProfileIcon_Click(object sender, RoutedEventArgs e)
+    {
+        SelectProfileFromIcon(sender);
+        DuplicateProfile();
+    }
+
+    private void DeleteProfileIcon_Click(object sender, RoutedEventArgs e)
+    {
+        SelectProfileFromIcon(sender);
+        DeleteProfile();
+    }
+
+    private void DuplicateProfileMenuItem_Click(object sender, RoutedEventArgs e) => DuplicateProfile();
+
+    private void DeleteProfileMenuItem_Click(object sender, RoutedEventArgs e) => DeleteProfile();
+
+    private void RenameProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (ContainerOf(ProfilesList.ItemContainerGenerator.ContainerFromIndex(ProfilesList.SelectedIndex)
+                        as DependencyObject) is { } item)
+            BeginProfileRename(item);
+    }
+
+    /// <summary>A second click on the selected config, or a right-click on a row, renames in place — no
+    /// name box parked above the list, and no separate button.</summary>
+    private void ProfilesList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ContainerOf(e.OriginalSource as DependencyObject) is { } item)
+            BeginProfileRename(item);
+    }
+
+    private void ProfilesList_RightDown(object sender, MouseButtonEventArgs e)
+    {
+        if (ContainerOf(e.OriginalSource as DependencyObject) is { } item)
+            ProfilesList.SelectedIndex = ProfilesList.ItemContainerGenerator.IndexFromContainer(item);
+    }
+
+    private void SelectProfileFromIcon(object sender)
+    {
+        if (ContainerOf(sender as DependencyObject) is { } item)
+            ProfilesList.SelectedIndex = ProfilesList.ItemContainerGenerator.IndexFromContainer(item);
+    }
+
+    private void BeginProfileRename(ListBoxItem item)
+    {
+        if (item.Content is not string old)
+            return;
+        var box = new TextBox { Text = old, MinWidth = 140, Padding = new Thickness(2, 0, 2, 0) };
+        var template = item.ContentTemplate;
+        item.ContentTemplate = null;                    // the editor stands in for the row while it is open
+        item.Content = box;
+        box.Focus();
+        box.SelectAll();
+
+        var done = false;
+        void Finish(string? typed)
+        {
+            if (done)
+                return;
+            done = true;
+            item.Content = old;
+            item.ContentTemplate = template;
+            if (typed is null)
+                return;                                 // Escape: leave the name as it was
+            var name = typed.Trim();
+            if (name.Length == 0 || name.Equals(old, StringComparison.Ordinal))
+                return;
+            if (configDoc.Dirty)
+                PersistConfigDoc(apply: true);          // keep what was typed under the old name first
+            app.Vm.Profiles.Rename(old, name);
+            profileName = name;
+            RebuildProfiles(name);
+        }
+
+        box.LostFocus += (_, _) => Finish(box.Text);
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+                Finish(box.Text);
+            else if (e.Key == Key.Escape)
+                Finish(null);
+        };
+    }
+
+    private void AddProfile_Click(object sender, RoutedEventArgs e) => AddProfile();
+
+    private void AddProfile()
     {
         // a config starts with the machine's own server and engine words and an empty models list —
         // enough to grow into something the engine would start with
@@ -652,7 +741,7 @@ public partial class SettingsPage : UserControl
         RebuildProfiles(name);
     }
 
-    private void DuplicateProfile_Click(object sender, RoutedEventArgs e)
+    private void DuplicateProfile()
     {
         if (profileName is null)
             return;
@@ -660,7 +749,7 @@ public partial class SettingsPage : UserControl
         RebuildProfiles(name);
     }
 
-    private void RemoveProfile_Click(object sender, RoutedEventArgs e)
+    private void DeleteProfile()
     {
         if (profileName is null)
             return;
@@ -672,19 +761,6 @@ public partial class SettingsPage : UserControl
         profileName = null;
         app.Vm.Profiles.Delete(name);
         RebuildProfiles();
-    }
-
-    private void ProfileName_LostFocus(object sender, RoutedEventArgs e)
-    {
-        var name = ProfileNameBox.Text.Trim();
-        if (profileName is null || name.Length == 0 || name.Equals(profileName, StringComparison.Ordinal))
-        {
-            ProfileNameBox.Text = profileName ?? "";
-            return;
-        }
-        app.Vm.Profiles.Rename(profileName, name);   // the models running with it keep running with it
-        profileName = name;
-        RebuildProfiles(name);
     }
 
     /// <summary>True while the main tab strip sits on Configs: the doc property points at the selected
@@ -811,22 +887,9 @@ public partial class SettingsPage : UserControl
         UpdateDirty();
     }
 
-    private void DuplicateModel_Click(object sender, RoutedEventArgs e)
-    {
-        if (entry is null)
-            return;
-        var copy = (JsonObject)entry.DeepClone();
-        var alias = ConfigDocument.Text(copy, "alias");
-        if (!string.IsNullOrWhiteSpace(alias))
-            copy["alias"] = alias + "-copy";
-        doc.Models.Add(copy);
-        doc.MarkDirty();
-        BuildModelList();
-        EntryList.SelectedIndex = EntryList.Items.Count - 1;
-        UpdateDirty();
-    }
+    private void RemoveModel_Click(object sender, RoutedEventArgs e) => RemoveModel();
 
-    private void RemoveModel_Click(object sender, RoutedEventArgs e)
+    private void RemoveModel()
     {
         if (entry is null)
             return;
@@ -838,6 +901,40 @@ public partial class SettingsPage : UserControl
         doc.MarkDirty();
         BuildModelList();
         UpdateDirty();
+    }
+
+    /// <summary>The × on a model row removes that model, whether it was selected or not.</summary>
+    private void RemoveModelIcon_Click(object sender, RoutedEventArgs e)
+    {
+        var list = AncestorOf<ListBox>(sender as DependencyObject);
+        var item = ContainerOf(sender as DependencyObject);
+        if (list is null || item is null)
+            return;
+        list.SelectedIndex = list.ItemContainerGenerator.IndexFromContainer(item);
+        RemoveModel();
+    }
+
+    /// <summary>The row and the list a small icon was clicked in — the icon's own row is the one acted on.</summary>
+    private static ListBoxItem? ContainerOf(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is ListBoxItem item)
+                return item;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
+    }
+
+    private static T? AncestorOf<T>(DependencyObject? source) where T : DependencyObject
+    {
+        while (source is not null)
+        {
+            if (source is T found)
+                return found;
+            source = VisualTreeHelper.GetParent(source);
+        }
+        return null;
     }
 
     private string? PickModelFile(string initial)
