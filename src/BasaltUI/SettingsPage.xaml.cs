@@ -510,8 +510,6 @@ public partial class SettingsPage : UserControl
         ProfileKeyBox.Password = name is null ? "" : app.Vm.Profiles.ApiKey(name);
         ProfileArgsBox.Text = name is null ? "" : app.Vm.Profiles.ExtraArgs(name);
         ProfileStartCheck.IsChecked = name is not null && app.Vm.Profiles.StartsOnLaunch(name);
-        ProfileState.Text = name is not null && app.Vm.Profiles.Active == name
-            ? "● active" : "";
     }
 
     /// <summary>The launch words belong to the config, not to the app: they travel with it in the store.</summary>

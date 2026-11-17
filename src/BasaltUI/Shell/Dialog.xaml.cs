@@ -25,6 +25,7 @@ public partial class Dialog : Window
         ConfirmButton.Content = confirm;
         CancelButton.Content = cancel;
         SourceInitialized += (_, _) => Win11.Round(this, App.IsDarkTheme);
+        KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) Close(); };
     }
 
     /// <summary>Two buttons; true only when the confirm one was pressed (Enter or click).</summary>

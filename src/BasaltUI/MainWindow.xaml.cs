@@ -4,6 +4,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using BasaltUI.Core;
 using BasaltUI.ViewModels;
@@ -27,6 +28,19 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = Vm;
         ThemeGlyph.Text = App.IsDarkTheme ? "\uE708" : "\uE706";
+        KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape && page != Page.Main)
+            {
+                Back_Click(this, e);
+                e.Handled = true;
+            }
+        };
+        MouseDown += (_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.XButton1 && page != Page.Main)
+                Back_Click(this, e);
+        };
         SettingsPanel.SetMode(false);
         ConfigsPanel.SetMode(true);
 
@@ -438,7 +452,7 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (sender is not Button { Tag: MainViewModel.ConfigModelRow model })
             return;
-        var row = new HomeModelRow(model.Id, "", false, Key: model.ModelFile);
+        var row = new HomeModelRow(model.Id, "", false, Key: model.ModelFile, ConfigName: model.ConfigName);
         new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
     }
 

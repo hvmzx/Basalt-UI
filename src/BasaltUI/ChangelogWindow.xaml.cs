@@ -6,9 +6,11 @@ namespace BasaltUI;
 /// while the question "update from X to Y?" is still open behind it.</summary>
 public partial class ChangelogWindow : Window
 {
-    public ChangelogWindow() => InitializeComponent();
-
-    public static async Task ShowAsync(Window? owner, App app, string title)
+    public ChangelogWindow()
+    {
+        InitializeComponent();
+        KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) Close(); };
+    }    public static async Task ShowAsync(Window? owner, App app, string title)
     {
         var window = new ChangelogWindow { Owner = owner ?? Application.Current.MainWindow };
         window.Notes.ShowText(title, "reading the release notes…");

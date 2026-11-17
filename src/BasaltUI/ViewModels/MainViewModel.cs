@@ -202,8 +202,11 @@ public sealed class MainViewModel : ObservableObject
             var count = runningProfiles.Count;
             if (count == 0)
                 return "";
-            var models = runningProfiles.Sum(n =>
+            var defined = runningProfiles.Sum(n =>
                 (Profiles.Document(n)?["models"] as JsonArray)?.Count ?? 0);
+            // The engine's own model table is the truth about what is loaded; the store's entry count is
+            // the fallback when the server has not reported its models yet.
+            var models = Math.Max(defined, status.Models.Count);
             return $"{count} config{(count == 1 ? "" : "s")} ({models} model{(models == 1 ? "" : "s")})";
         }
     }
@@ -266,9 +269,21 @@ public sealed class MainViewModel : ObservableObject
             return $"prefill avg {rows.Average():N0} · max {rows.Max():N0} tok/s (recent)";
         }
     }
-    public string GpuNameText => Gpu?.Name is { Length: > 0 } name ? name
-                               : machine.Video.Name is { Length: > 0 } card ? card
-                               : "no gpu reported";
+    public string GpuNameText
+    {
+        get
+        {
+            var name = Gpu?.Name is { Length: > 0 } gpu ? gpu
+                     : machine.Video.Name is { Length: > 0 } card ? card
+                     : "no gpu reported";
+            var bits = new List<string>();
+            if (!string.IsNullOrWhiteSpace(status.Cuda))
+                bits.Add("CUDA " + status.Cuda.Trim());
+            if (!string.IsNullOrWhiteSpace(status.Driver))
+                bits.Add("Driver " + status.Driver.Trim());
+            return bits.Count == 0 ? name : $"{name} ({string.Join(", ", bits)})";
+        }
+    }
     public double GpuUtilFraction => Math.Clamp((Gpu?.Util ?? 0) / 100.0, 0, 1);
     public string GpuUtilValue => Gpu is { } g ? g.Util.ToString("0") + " %" : "—";
     // The card's memory in Windows' words: what the card carries (DXGI) and what fills it (the performance
@@ -350,9 +365,8 @@ public sealed class MainViewModel : ObservableObject
                 bits.Add(status.CpuName.Trim());
             if (status.Cores > 0)
                 bits.Add(status.Cores + " cores / " + status.Threads + " threads");
-            if (!string.IsNullOrWhiteSpace(status.Driver))
-                bits.Add("driver " + status.Driver);
-            return bits.Count == 0 ? "—" : string.Join(" · ", bits);
+            bits.Add(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString());
+            return string.Join(" · ", bits);
         }
     }
     public string UptimeText
@@ -398,7 +412,8 @@ public sealed class MainViewModel : ObservableObject
         public string ActionTip => Running ? "Stop this config" : "Load this config";
     }
 
-    public sealed record ConfigModelRow(string Id, string ModelFile, string Size, string Context, bool Loaded)
+    public sealed record ConfigModelRow(string Id, string ModelFile, string ConfigName, string Size,
+                                        string Context, bool Loaded)
     {
         public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);
         public bool HasBadge => Badge is not null;
@@ -460,7 +475,7 @@ public sealed class MainViewModel : ObservableObject
                 var size = length > 0 ? BasaltLocator.HumanBytes(length) : "size unknown";
                 var context = ConfigDocument.Int(entry, "max-context");
                 var isLoaded = Path.GetFileName(model).Equals(Path.GetFileName(loaded), StringComparison.OrdinalIgnoreCase);
-                rows.Add(new ConfigModelRow(Path.GetFileNameWithoutExtension(model), model, size,
+                rows.Add(new ConfigModelRow(Path.GetFileNameWithoutExtension(model), model, name, size,
                                             context is { } n ? n.ToString() : "default", isLoaded));
             }
             var sizeText = bytes > 0
@@ -2026,18 +2041,25 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public IReadOnlyList<ModelSession> HistoryFor(HomeModelRow row)
     {
-        var stem = Path.GetFileNameWithoutExtension(row.Id);
+        // Exact identities first: the full file name a config carries, then the bare name the engine
+        // usually reports.
         var candidates = new List<string> { row.Key, row.Id, row.Id + ".basalt", row.Id + ".gguf" };
         foreach (var key in candidates)
             if (key.Length > 0 && Throughput.HasAnything(key))
                 return Throughput.Sessions(key);
 
+        // A stem alone is not enough — two configs can hold the same model — so only accept a recorded
+        // key whose file this very config actually defines.
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var config = Profiles.Document(row.ConfigName);
+        if (config is not null)
+            foreach (var node in (config["models"] as JsonArray ?? []).OfType<JsonObject>())
+                if (Path.GetFileName(ConfigDocument.Text(node, "model") ?? "") is { Length: > 0 } file)
+                    allowed.Add(file);
         var match = Throughput.ModelNames().FirstOrDefault(k =>
-        {
-            var file = Path.GetFileName(k);
-            return file.Equals(row.Id, StringComparison.OrdinalIgnoreCase) ||
-                   Path.GetFileNameWithoutExtension(file).Equals(stem, StringComparison.OrdinalIgnoreCase);
-        });
+            allowed.Contains(Path.GetFileName(k)) &&
+            (Path.GetFileNameWithoutExtension(k).Equals(row.Id, StringComparison.OrdinalIgnoreCase) ||
+             Path.GetFileName(k).Equals(row.Id, StringComparison.OrdinalIgnoreCase)));
         return match is null ? Array.Empty<ModelSession>() : Throughput.Sessions(match);
     }
 
@@ -2427,7 +2449,7 @@ public sealed class MainViewModel : ObservableObject
 
 /// <summary>One row of the Models card: a model the server serves, or a file in the models folder.</summary>
 public sealed record HomeModelRow(string Id, string Detail, bool Live, bool Loaded = false,
-                                  string Stats = "", string Key = "")
+                                  string Stats = "", string Key = "", string ConfigName = "")
 {
     /// <summary>The family mark the row wears; null when the name matches no known family, and a null row wears no tile.</summary>
     public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);

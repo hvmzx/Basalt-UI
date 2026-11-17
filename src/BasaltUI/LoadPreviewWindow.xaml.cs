@@ -26,6 +26,7 @@ public partial class LoadPreviewWindow : Window
     public LoadPreviewWindow()
     {
         InitializeComponent();
+        KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) Close(); };
         SourceInitialized += (_, _) => Shell.Win11.Round(this, App.IsDarkTheme);
         Closed += (_, _) => { if (Current == this) Current = null; };
     }
