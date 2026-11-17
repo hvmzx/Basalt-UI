@@ -188,7 +188,8 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>The line beside the state pill — only when it says something the pill does not.</summary>
+    /// <summary>The line beside the state pill: how many of the named configs are serving, and how many
+    /// models those configs define. The model name and request counts belong to the cards, not here.</summary>
     public string StatusText
     {
         get
@@ -198,15 +199,12 @@ public sealed class MainViewModel : ObservableObject
                 var detail = process.StateDetail;
                 return detail.Equals(RunStateText, StringComparison.OrdinalIgnoreCase) ? "" : detail;
             }
-            var parts = new List<string>();
-            if (!string.IsNullOrWhiteSpace(status.ModelName))
-                parts.Add(status.ModelName);
-            if (status.Models.Count > 1)
-                parts.Add(status.Models.Count + " models");
-            if (status.Loaded && status.SlotsTotal > 0)
-                parts.Add("requests " + status.SlotsActive + "/" + status.SlotsTotal +
-                          (status.Queued > 0 ? $" · {status.Queued} waiting" : ""));
-            return string.Join("  ·  ", parts);
+            var count = runningProfiles.Count;
+            if (count == 0)
+                return "";
+            var models = runningProfiles.Sum(n =>
+                (Profiles.Document(n)?["models"] as JsonArray)?.Count ?? 0);
+            return $"{count} config{(count == 1 ? "" : "s")} ({models} model{(models == 1 ? "" : "s")})";
         }
     }
 
@@ -392,17 +390,35 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>What the main page shows: the named configs, each with the models its document defines.</summary>
     public ObservableCollection<ConfigCard> ConfigCards { get; } = [];
 
-    public sealed record ConfigCard(string Name, bool Active, int Port, string Size,
+    public sealed record ConfigCard(string Name, bool Active, bool Running, int Port, string Size,
                                     IReadOnlyList<ConfigModelRow> Models)
     {
-        public string Title => Active ? "● " + Name : Name;
+        public string Title => Name;
+        public string ActionGlyph => Running ? "\uE71A" : "\uE768";
+        public string ActionTip => Running ? "Stop this config" : "Load this config";
     }
 
-    public sealed record ConfigModelRow(string Id, string Size, string Context, bool Loaded)
+    public sealed record ConfigModelRow(string Id, string ModelFile, string Size, string Context, bool Loaded)
     {
         public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);
         public bool HasBadge => Badge is not null;
         public string Facts => $"{Size}  ·  {Context} ctx";
+    }
+
+    /// <summary>The configs currently serving models, and the one this window watches.</summary>
+    private readonly HashSet<string> runningProfiles = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool IsConfigRunning(string name) => runningProfiles.Contains(name);
+
+    private void SetRunning(string? name, bool on)
+    {
+        if (name is null)
+            return;
+        var changed = on ? runningProfiles.Add(name) : runningProfiles.Remove(name);
+        if (!changed)
+            return;
+        Raise(nameof(StatusText));
+        RebuildConfigCards();
     }
 
     /// <summary>Rebuilds the config cards from the store and the current loaded-model state.</summary>
@@ -444,13 +460,14 @@ public sealed class MainViewModel : ObservableObject
                 var size = length > 0 ? BasaltLocator.HumanBytes(length) : "size unknown";
                 var context = ConfigDocument.Int(entry, "max-context");
                 var isLoaded = Path.GetFileName(model).Equals(Path.GetFileName(loaded), StringComparison.OrdinalIgnoreCase);
-                rows.Add(new ConfigModelRow(Path.GetFileNameWithoutExtension(model), size,
+                rows.Add(new ConfigModelRow(Path.GetFileNameWithoutExtension(model), model, size,
                                             context is { } n ? n.ToString() : "default", isLoaded));
             }
             var sizeText = bytes > 0
                 ? BasaltLocator.HumanBytes(bytes) + (experts > 0 ? $"  (experts {BasaltLocator.HumanBytes(experts)})" : "")
                 : "";
-            ConfigCards.Add(new ConfigCard(name, Profiles.Active == name, port, sizeText, rows));
+            ConfigCards.Add(new ConfigCard(name, Profiles.Active == name, IsConfigRunning(name),
+                                           port, sizeText, rows));
         }
         OnUi(RaiseDisplay);
     }
@@ -1120,6 +1137,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 if (!process.IsAlive)
                     await StartAsync();
+                if (process.IsAlive)
+                    SetRunning(name, true);
                 continue;
             }
 
@@ -1140,6 +1159,7 @@ public sealed class MainViewModel : ObservableObject
             if (extra.Start(spec))
             {
                 otherServers[name] = extra;
+                SetRunning(name, true);
                 Append($"app: started config \"{name}\" on port {port} — {Path.GetFileName(target)}", LogSource.App);
             }
             else
@@ -1248,6 +1268,9 @@ public sealed class MainViewModel : ObservableObject
             return;
         Append("app: stopping (Ctrl+C to the server)", LogSource.App);
         await process.StopAsync(Settings.StopGraceSeconds);
+        if (!process.IsAlive)
+            foreach (var name in runningProfiles.ToList())
+                SetRunning(name, false);
         OnUi(RefreshCommands);
     }
 
@@ -1753,6 +1776,10 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(RunStateText));
         Raise(nameof(IsRunning));
         Raise(nameof(ModelsEmptyText));
+        if (state is RunState.Stopped or RunState.Failed)
+            foreach (var name in runningProfiles.ToList())
+                if (name == Profiles.Active)
+                    SetRunning(name, false);
         RefreshCommands();
     });
 
@@ -1910,6 +1937,8 @@ public sealed class MainViewModel : ObservableObject
             await RestartAsync(userDirected: true);
         else
             await StartAsync();
+        if (process.IsAlive)
+            SetRunning(name, true);
         Append($"app: config \"{name}\" loaded", LogSource.App);
     }
 
@@ -1997,10 +2026,19 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     public IReadOnlyList<ModelSession> HistoryFor(HomeModelRow row)
     {
-        foreach (var key in new[] { row.Key, row.Id })
+        var stem = Path.GetFileNameWithoutExtension(row.Id);
+        var candidates = new List<string> { row.Key, row.Id, row.Id + ".basalt", row.Id + ".gguf" };
+        foreach (var key in candidates)
             if (key.Length > 0 && Throughput.HasAnything(key))
                 return Throughput.Sessions(key);
-        return Array.Empty<ModelSession>();
+
+        var match = Throughput.ModelNames().FirstOrDefault(k =>
+        {
+            var file = Path.GetFileName(k);
+            return file.Equals(row.Id, StringComparison.OrdinalIgnoreCase) ||
+                   Path.GetFileNameWithoutExtension(file).Equals(stem, StringComparison.OrdinalIgnoreCase);
+        });
+        return match is null ? Array.Empty<ModelSession>() : Throughput.Sessions(match);
     }
 
     /// <summary>

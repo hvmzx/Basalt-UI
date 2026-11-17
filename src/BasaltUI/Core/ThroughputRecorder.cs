@@ -311,6 +311,14 @@ public sealed class ThroughputRecorder
         }
     }
 
+    /// <summary>Every model key the recorder holds, so a UI row can find its history even when the engine
+    /// names the model by path and the card names it by file stem.</summary>
+    public IReadOnlyList<string> ModelNames()
+    {
+        lock (gate)
+            return [.. books.Keys];
+    }
+
     public bool HasAnything(string model)
     {
         lock (gate)

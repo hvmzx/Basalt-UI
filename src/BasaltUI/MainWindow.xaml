@@ -259,7 +259,6 @@
                                            ToolTip="What reading fresh prompts averaged since basalt started, and the record. Reused context is not prefill — the engine already had it, so it never slows this number down." />
                             </Grid>
                             <DockPanel Margin="0,10,0,0" LastChildFill="False">
-                                <TextBlock DockPanel.Dock="Left" Text="{Binding QueueText}" Style="{StaticResource Chip}" />
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding EngineLine}" Style="{StaticResource Label}"
                                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                             </DockPanel>
@@ -351,8 +350,18 @@
                                                                 Style="{StaticResource GhostButton}"
                                                                 Click="OpenConfig_Click" Tag="{Binding Name}" Padding="0,2"
                                                                 ToolTip="Open this config's settings">
-                                                            <TextBlock Text="{Binding Title}" Style="{StaticResource CardTitle}"
-                                                                       VerticalAlignment="Center" />
+                                                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource CardTitle}">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Running}" Value="True">
+                                                                                <Setter Property="Foreground" Value="{DynamicResource Good}" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
                                                         </Button>
                                                         <TextBlock Grid.Column="1" Margin="0,0,10,0"
                                                                    VerticalAlignment="Center"
@@ -366,9 +375,9 @@
                                                             <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE774;" />
                                                         </Button>
                                                         <Button Grid.Column="4" Style="{StaticResource GhostButton}"
-                                                                Click="LoadConfig_Click" Tag="{Binding Name}"
-                                                                Width="26" Padding="0" ToolTip="Load this config">
-                                                            <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="&#xE768;" />
+                                                                Click="ConfigPlayStop_Click" Tag="{Binding Name}"
+                                                                Width="26" Padding="0" ToolTip="{Binding ActionTip}">
+                                                            <TextBlock Style="{StaticResource Icon}" FontSize="13" Text="{Binding ActionGlyph}" />
                                                         </Button>
                                                     </Grid>
                                                     <ItemsControl ItemsSource="{Binding Models}" Margin="0,8,0,0">

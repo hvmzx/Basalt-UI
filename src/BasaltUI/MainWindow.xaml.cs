@@ -422,10 +422,14 @@ public partial class MainWindow : Window
             Vm.OpenWebUiFor(name);
     }
 
-    private void LoadConfig_Click(object sender, RoutedEventArgs e)
+    private void ConfigPlayStop_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is Button { Tag: string name })
+        if (sender is not Button { Tag: string name })
+            return;
+        if (Vm.IsConfigRunning(name))
+            _ = Vm.StopAsync();
+        else
             _ = Vm.LoadConfigAsync(name);
     }
 
@@ -434,7 +438,7 @@ public partial class MainWindow : Window
         e.Handled = true;
         if (sender is not Button { Tag: MainViewModel.ConfigModelRow model })
             return;
-        var row = new HomeModelRow(model.Id, "", false);
+        var row = new HomeModelRow(model.Id, "", false, Key: model.ModelFile);
         new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
     }
 
