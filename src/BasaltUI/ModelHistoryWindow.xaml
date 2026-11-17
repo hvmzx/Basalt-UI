@@ -58,6 +58,31 @@
                                         DisplayMemberBinding="{Binding Prefill}" />
                     </GridView>
                 </ListView.View>
+                <!-- the row spells its columns out: the theme's plain ContentPresenter left every session
+                     as one ToString line in the first column, so the presenter is said directly -->
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="{x:Type ListViewItem}" BasedOn="{StaticResource {x:Type ListViewItem}}">
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="{x:Type ListViewItem}">
+                                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5"
+                                            Padding="{TemplateBinding Padding}" BorderThickness="0">
+                                        <GridViewRowPresenter Content="{TemplateBinding Content}"
+                                                              SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SurfaceHi}" />
+                                        </Trigger>
+                                        <Trigger Property="IsEnabled" Value="False">
+                                            <Setter Property="Opacity" Value="0.4" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListView.ItemContainerStyle>
             </ListView>
             <TextBlock Margin="18,16,18,12" TextWrapping="Wrap"
                        Text="nothing here yet — one line arrives for every run of basalt this model has seen while this app was open">
