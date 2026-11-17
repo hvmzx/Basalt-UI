@@ -27,6 +27,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = Vm;
         ThemeGlyph.Text = App.IsDarkTheme ? "\uE708" : "\uE706";
+        SettingsPanel.SetMode(false);
+        ConfigsPanel.SetMode(true);
 
         ApplySavedBounds();
         SourceInitialized += (_, _) =>
@@ -63,7 +65,7 @@ public partial class MainWindow : Window
         app.Downloads.ListChanged += RefreshDownloadsLink;
         app.Downloads.ItemChanged += _ => RefreshDownloadsLink();
         RefreshDownloadsLink();
-        ModelsList.ContextMenuOpening += ModelRowMenu_Opening;
+
 
         SetRequestsCollapsed(Vm.Settings.RecentRequestsCollapsed);
     }
@@ -100,7 +102,7 @@ public partial class MainWindow : Window
     }
 
     // ---- pages: the dashboard, and settings / downloads / release notes over it -------------------------------
-    private enum Page { Main, Settings, Downloads, Notes }
+    private enum Page { Main, Settings, Configs, Downloads, Notes }
 
     private Page page = Page.Main;
 
@@ -109,9 +111,12 @@ public partial class MainWindow : Window
         page = which;
         if (which == Page.Settings)
             SettingsPanel.OnShown();
+        if (which == Page.Configs)
+            ConfigsPanel.OnShown();
         if (which == Page.Downloads)
             DownloadsPanel.OnShown();
         SettingsPanel.Visibility = which == Page.Settings ? Visibility.Visible : Visibility.Collapsed;
+        ConfigsPanel.Visibility = which == Page.Configs ? Visibility.Visible : Visibility.Collapsed;
         DownloadsPanel.Visibility = which == Page.Downloads ? Visibility.Visible : Visibility.Collapsed;
         NotesPage.Visibility = which == Page.Notes ? Visibility.Visible : Visibility.Collapsed;
         PageMain.Visibility = which == Page.Main ? Visibility.Visible : Visibility.Collapsed;
@@ -122,13 +127,23 @@ public partial class MainWindow : Window
             PageTitleText.Text = which switch
             {
                 Page.Settings => "Settings",
+                Page.Configs => "Configs",
                 Page.Downloads => "Downloads",
                 _ => "Release notes",
             };
     }
 
-    /// <summary>The window is one window: settings is a page over the dashboard, and the arrow takes you back.</summary>
+    /// <summary>The window is one window: settings and configs are pages over the dashboard, and the arrow takes you back.</summary>
     public void OpenSettings() => ShowPage(Page.Settings);
+
+    /// <summary>Configs is its own page now, reached from a config card or a model's right-click.</summary>
+    public void OpenConfigs() => ShowPage(Page.Configs);
+
+    public void RevealConfig(string name)
+    {
+        ShowPage(Page.Configs);
+        ConfigsPanel.RevealProfile(name);
+    }
 
     /// <summary>The downloads centre, the same kind of page: the arrow takes you back.</summary>
     public void OpenDownloads() => ShowPage(Page.Downloads);
@@ -143,6 +158,8 @@ public partial class MainWindow : Window
     private void Back_Click(object sender, RoutedEventArgs e)
     {
         if (page == Page.Settings && !SettingsPanel.TryLeave())
+            return;
+        if (page == Page.Configs && !ConfigsPanel.TryLeave())
             return;
         ShowPage(Page.Main);
     }
@@ -246,27 +263,6 @@ public partial class MainWindow : Window
 
     private void IgnoreForeign_Click(object sender, RoutedEventArgs e) => Vm.IgnoreForeign();
 
-    private void SwitchModel_Click(object sender, RoutedEventArgs e) => SwitchSelected();
-
-    private void ModelDouble_Click(object sender, RoutedEventArgs e) => SwitchSelected();
-
-    private void SwitchSelected()
-    {
-        // A switch is an HTTP call to a server that has to be answering; with none there is nothing to
-        // tell, and the button beside this list is already showing that.
-        if (ModelsList.SelectedItem is not HomeModelRow row)
-            return;
-        if (!row.Live)
-        {
-            _ = Vm.OpenLocalModel(row.Id);   // a folder file: switch it in, or start basalt when the config already points at it
-            return;
-        }
-        if (!Vm.IsConnected)
-            return;
-        if (row.Loaded)
-            return;
-        _ = Vm.SwitchModelAsync(row.Id);
-    }
 
     // ---- the version dot ---------------------------------------------------------------------------------------
     private async void UpdateDot_Click(object sender, RoutedEventArgs e)
@@ -380,11 +376,6 @@ public partial class MainWindow : Window
         Vm.Settings.Save();
     }
 
-    /// <summary>
-    /// One model's history: every session of basalt the app watched it run, newest first. The window asks
-    /// the view model, which asks the recorder, so the list always says what was actually seen — and the
-    /// time the app was away, counted from the engine's own totals, stands as its own ≈ line.
-    /// </summary>
     /// <summary>The one light/dark switch on the main page: a moon in dark mode, a sun in light.</summary>
     private void Theme_Click(object sender, RoutedEventArgs e)
     {
@@ -393,46 +384,46 @@ public partial class MainWindow : Window
         Shell.Win11.Round(this, App.IsDarkTheme);
     }
 
-    /// <summary>The web UI belongs to the config the model runs with, not to one global server.</summary>
-    private void WebUi_Click(object sender, RoutedEventArgs e)
+    /// <summary>A config card's gear takes you to its own page, with that config selected.</summary>
+    private void OpenConfig_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is Button { Tag: HomeModelRow row })
-            Vm.OpenWebUiFor(row);
+        if (sender is Button { Tag: string name })
+            RevealConfig(name);
     }
 
-    private void History_Click(object sender, RoutedEventArgs e)
+    private void LoadConfigModel_Click(object sender, RoutedEventArgs e)
     {
         e.Handled = true;
-        if (sender is not Button { Tag: HomeModelRow row })
+        if (sender is Button { Tag: MainViewModel.ConfigModelRow model })
+            _ = Vm.SwitchModelAsync(model.Id);
+    }
+
+    private void WebUiModel_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is Button { Tag: MainViewModel.ConfigModelRow model })
+            Vm.OpenWebUiFor(model.Id);
+    }
+
+    private void HistoryModel_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+        if (sender is not Button { Tag: MainViewModel.ConfigModelRow model })
             return;
+        var row = new HomeModelRow(model.Id, "", false);
         new ModelHistoryWindow(row, Vm) { Owner = this }.ShowDialog();
     }
 
-    /// <summary>Right-click on a model row: its named config, or the entry itself. The menu is built
-    /// here, at open time, because its shape depends on the row: which config it wears, and whether a
-    /// file stands behind it at all.</summary>
-    private void ModelRowMenu_Opening(object sender, ContextMenuEventArgs e)
+    /// <summary>A model's own actions on the main page: attach, detach, open its config.</summary>
+    private void ConfigModelActions_Click(object sender, RoutedEventArgs e)
     {
-        var row = RowOfMenu(e.OriginalSource);
-        if (row is null)
-        {
-            ModelsList.ContextMenu = null;
+        e.Handled = true;
+        if (sender is not Button { Tag: MainViewModel.ConfigModelRow model })
             return;
-        }
-        ModelsList.ContextMenu = ModelRowMenu(row);
-    }
-
-    private static HomeModelRow? RowOfMenu(object? source)
-    {
-        DependencyObject? d = source as DependencyObject;
-        while (d is not null)
-        {
-            if (d is FrameworkElement { DataContext: HomeModelRow row })
-                return row;
-            d = VisualTreeHelper.GetParent(d);
-        }
-        return null;
+        var menu = ModelRowMenu(new HomeModelRow(model.Id, "", false, Loaded: model.Loaded));
+        menu.PlacementTarget = sender as Button;
+        menu.IsOpen = true;
     }
 
     private ContextMenu ModelRowMenu(HomeModelRow row)
@@ -443,8 +434,8 @@ public partial class MainWindow : Window
 
         if (worn is not null)
         {
-            menu.Items.Add(Item($"Edit config “{worn}”…", () => { ShowPage(Page.Settings); SettingsPanel.RevealProfile(worn); },
-                                tip: "The Configs tab of Settings, on this config's whole document — its models, server and engine. Saving it rewrites the file when it is the active one."));
+            menu.Items.Add(Item($"Edit config “{worn}”…", () => RevealConfig(worn),
+                                tip: "The Configs page, on this config's whole document — its models, server and engine"));
             menu.Items.Add(Item($"Detach “{worn}”", () => Vm.AttachProfile(row, null),
                                 tip: "Only the link goes — the file is untouched."));
         }
@@ -467,9 +458,8 @@ public partial class MainWindow : Window
         attach.Items.Add(Item("New config for this model…", () =>
         {
             var name = Vm.NewProfileFor(row);
-            ShowPage(Page.Settings);
-            SettingsPanel.RevealProfile(name);
-        }, tip: "Starts as the config the machine runs now, with this model first in line — a place to diverge from. Attaching is what applies it."));
+            RevealConfig(name);
+        }, tip: "Starts as the config the machine runs now, with this model first in line — a place to diverge from"));
         menu.Items.Add(attach);
 
         menu.Items.Add(Item("Show in folder", () => ShowInFolder(row), row.HasFile,

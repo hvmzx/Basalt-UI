@@ -12,8 +12,8 @@
         Width="1180" Height="800" MinWidth="720" MinHeight="480"
         WindowStartupLocation="CenterOwner"
         WindowStyle="None"
-        Background="{StaticResource Window}"
-        Foreground="{StaticResource TextPrimary}"
+        Background="{DynamicResource Window}"
+        Foreground="{DynamicResource TextPrimary}"
         FontFamily="{StaticResource FontText}" FontSize="13"
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display"
@@ -49,6 +49,6 @@
 
         <!-- the default background keeps the window dark while the first page load paints itself -->
         <wv2:WebView2 x:Name="Browser" Grid.Row="1"
-                      DefaultBackgroundColor="#0B0D10" />
+                      />
     </Grid>
 </Window>

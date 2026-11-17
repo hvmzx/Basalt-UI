@@ -5,7 +5,7 @@
         Title="What changed" Width="760" Height="620"
         MinWidth="480" MinHeight="320"
         WindowStartupLocation="CenterOwner"
-        Background="{DynamicResource Window}" Foreground="{StaticResource TextPrimary}"
+        Background="{DynamicResource Window}" Foreground="{DynamicResource TextPrimary}"
         FontFamily="{StaticResource FontText}" FontSize="13"
         UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
     <Grid Margin="18,12,18,16">

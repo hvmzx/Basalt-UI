@@ -23,6 +23,7 @@ public partial class WebUiWindow : Window
         pendingUrl = url;
         InitializeComponent();
         UrlText.Text = url;
+        Browser.DefaultBackgroundColor = ThemeBacking();
         SourceInitialized += (_, _) => Shell.Win11.Round(this, App.IsDarkTheme);
 
         // The browser is brought up here, in Loaded, with our own user-data folder. Setting a Source or
@@ -65,6 +66,20 @@ public partial class WebUiWindow : Window
     {
         if (Browser.CoreWebView2 is not null)
             Browser.CoreWebView2.Reload();
+    }
+
+    /// <summary>WebView2 wants a System.Drawing colour; the app's token is a WPF one.</summary>
+    private System.Drawing.Color ThemeBacking()
+    {
+        var c = ((System.Windows.Media.SolidColorBrush)FindResource("Window")).Color;
+        return System.Drawing.Color.FromArgb(c.A, c.R, c.G, c.B);
+    }
+
+    /// <summary>The browser paints its own backing, so it is told about a theme switch while it is open.</summary>
+    public void RefreshTheme()
+    {
+        if (Browser is not null)
+            Browser.DefaultBackgroundColor = ThemeBacking();
     }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

@@ -99,6 +99,17 @@ public partial class App : Application
         Settings.ThemeDark = !IsDarkTheme;
         Settings.Save();
         ApplyTheme(Settings.ThemeDark.Value);
+        // DynamicResource references re-resolve themselves; anything painted from a snapshot needs a nudge,
+        // and the window frames carry the old dark-mode flag until they are told again.
+        foreach (var window in Current.Windows.OfType<Window>())
+        {
+            if (!window.IsLoaded)
+                continue;
+            window.InvalidateVisual();
+            if (window is WebUiWindow web)
+                web.RefreshTheme();
+            Shell.Win11.Round(window, IsDarkTheme);
+        }
     }
 
     // ---- startup ------------------------------------------------------------------------------------------

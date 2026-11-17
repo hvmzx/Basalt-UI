@@ -6,7 +6,7 @@
 <UserControl x:Class="BasaltUI.ReleaseNotesPage"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Foreground="{StaticResource TextPrimary}">
+             Foreground="{DynamicResource TextPrimary}">
 
     <Grid Margin="20,14,20,0">
         <Grid.RowDefinitions>

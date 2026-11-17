@@ -9,7 +9,7 @@
              xmlns:core="clr-namespace:BasaltUI.Core"
              xmlns:cv="clr-namespace:BasaltUI.Converters"
              Background="{x:Null}"
-             Foreground="{StaticResource TextPrimary}"
+             Foreground="{DynamicResource TextPrimary}"
              FontFamily="{StaticResource FontText}" FontSize="13"
              UseLayoutRounding="True"
              TextOptions.TextFormattingMode="Display">

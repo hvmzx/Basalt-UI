@@ -92,6 +92,22 @@ public partial class SettingsPage : UserControl
         ready = true;
     }
 
+    /// <summary>The same control is used twice: once as the plain Settings page, once as the Configs
+    /// page. Only the page content differs — the tab strip and the settings chrome are hidden in configs mode.</summary>
+    public void SetMode(bool configs)
+    {
+        var rows = ((Grid)Content).RowDefinitions;
+        rows[0].Height = new GridLength(configs ? 0 : 44);
+        rows[1].Height = new GridLength(configs ? 0 : 1, GridUnitType.Auto);
+        rows[3].Height = new GridLength(configs ? 0 : 1, GridUnitType.Auto);
+        Tabs.Visibility = configs ? Visibility.Collapsed : Visibility.Visible;
+        SettingsHeader.Visibility = configs ? Visibility.Collapsed : Visibility.Visible;
+        SettingsFooter.Visibility = configs ? Visibility.Collapsed : Visibility.Visible;
+        Tabs.SelectedIndex = configs ? 1 : 0;
+        if (configs && profileName is null && app.Vm.Profiles.Names.Count > 0)
+            RebuildProfiles(app.Vm.Profiles.Names[0]);
+    }
+
     // ---- the config file -----------------------------------------------------------------------------------
     private static string DefaultConfigPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BasaltUI", "basalt_config.json");

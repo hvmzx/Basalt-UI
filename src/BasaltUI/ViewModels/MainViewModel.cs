@@ -389,6 +389,53 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<RequestRow> Recent { get; } = [];
     public ObservableCollection<ModelRow> ModelRows { get; } = [];
 
+    /// <summary>What the main page shows: the named configs, each with the models its document defines.</summary>
+    public ObservableCollection<ConfigCard> ConfigCards { get; } = [];
+
+    public sealed record ConfigCard(string Name, bool Active, int Port, IReadOnlyList<ConfigModelRow> Models)
+    {
+        public string Title => Active ? "● " + Name : Name;
+    }
+
+    public sealed record ConfigModelRow(string Id, string Size, string Context, int Port, bool Loaded, bool HasFile)
+    {
+        public ModelIdentity.Identity? Badge => ModelIdentity.For(Id);
+        public bool HasBadge => Badge is not null;
+        public string Facts => $"{Size}  ·  {Context} ctx  ·  :{Port}";
+    }
+
+    /// <summary>Rebuilds the config cards from the store and the current loaded-model state.</summary>
+    public void RebuildConfigCards()
+    {
+        ConfigCards.Clear();
+        var loaded = ThroughputRecorder.LoadedModelOf(status);
+        foreach (var name in Profiles.Names)
+        {
+            var document = Profiles.Document(name);
+            if (document is null)
+                continue;
+            var server = document["server"] as JsonObject;
+            var port = server is not null && int.TryParse(ConfigDocument.Text(server, "port"), out var p)
+                ? p : 8080;
+            var rows = new List<ConfigModelRow>();
+            foreach (var entry in (document["models"] as JsonArray ?? []).OfType<JsonObject>())
+            {
+                var model = ConfigDocument.Text(entry, "model") ?? "";
+                var file = LocalFileOf(model);
+                var size = file is not null && File.Exists(file)
+                    ? BasaltLocator.HumanBytes(new FileInfo(file).Length)
+                    : "size unknown";
+                var context = ConfigDocument.Int(entry, "max-context");
+                var isLoaded = Path.GetFileName(model).Equals(Path.GetFileName(loaded), StringComparison.OrdinalIgnoreCase);
+                rows.Add(new ConfigModelRow(Path.GetFileNameWithoutExtension(model), size,
+                                            context is { } n ? n.ToString() : "default", port,
+                                            isLoaded, file is not null));
+            }
+            ConfigCards.Add(new ConfigCard(name, Profiles.Active == name, port, rows));
+        }
+        OnUi(RaiseDisplay);
+    }
+
     /// <summary>What the Models card lists: served models first, then the models folder's files.</summary>
     public ObservableCollection<HomeModelRow> DisplayModels { get; } = [];
     public ObservableCollection<string> Warnings { get; } = [];
@@ -937,11 +984,13 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public void OpenWebUiFor(HomeModelRow row) => OpenWebUiFor(row.Id);
+
     /// <summary>Open the web UI of the server this model actually runs with — the config assigned to its
-    /// row, or the active one when it has no assignment. With several basalts there is no single web UI.</summary>
-    public void OpenWebUiFor(HomeModelRow row)
+    /// name, or the active one when it has no assignment. With several basalts there is no single web UI.</summary>
+    public void OpenWebUiFor(string modelName)
     {
-        var name = Profiles.AssignedTo(row.Id);
+        var name = Profiles.AssignedTo(modelName);
         var document = name is not null ? Profiles.Document(name) : getConfig()?.Root;
         var host = "127.0.0.1";
         var port = 8080;
@@ -1692,6 +1741,7 @@ public sealed class MainViewModel : ObservableObject
 
         RebuildModels(snapshot);
         RebuildWarnings(snapshot);
+        RebuildConfigCards();          // the loaded one stays green among the config cards
         MaybeProbeServed();      // the card's dedup asks the router what names it serves; answers may redraw it
     });
 
@@ -1790,6 +1840,7 @@ public sealed class MainViewModel : ObservableObject
             Profiles.Assign(modelFile, name);
         reopenConfig();                                     // the app re-reads what was just written
         ReapplyPolling();                                   // the new config may listen on another port
+        RebuildConfigCards();
         return null;
     }
 
@@ -1849,6 +1900,7 @@ public sealed class MainViewModel : ObservableObject
         var name = Profiles.Create("config", seed);
         if (FileOfRow(row) is { } file)
             Profiles.Assign(file, name);
+        RebuildConfigCards();
         return name;
     }
 

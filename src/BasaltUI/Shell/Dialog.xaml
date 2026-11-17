@@ -13,7 +13,7 @@
         WindowStartupLocation="CenterOwner"
         WindowStyle="None"
         Background="{DynamicResource Window}"
-        Foreground="{StaticResource TextPrimary}"
+        Foreground="{DynamicResource TextPrimary}"
         FontFamily="{StaticResource FontText}" FontSize="13"
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display"
