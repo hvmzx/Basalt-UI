@@ -1150,16 +1150,38 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!PrepareStart(out var spec))
             return false;
-        Append($"app: starting {Path.GetFileName(spec.ExePath)} {spec.BuildArguments()}", LogSource.App);
-        var ok = process.Start(spec);
-        OnUi(() => RefreshCommands());
-        if (ok)
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
+            Append($"app: starting {Path.GetFileName(spec.ExePath)} {spec.BuildArguments()}", LogSource.App);
+            var ok = process.Start(spec);
+            OnUi(() => RefreshCommands());
+            if (!ok)
+                return false;
             ReapplyPolling();
             poller.Start(Settings.PollMs);
-            await poller.BeatAsync();
+
+            // A start is not a start until the engine stays up. Right after a forced stop the relaunch
+            // can lose the engine's own first check — VRAM still releasing, the model file still held —
+            // and the launcher exits within seconds with a code.
+            if (!await process.WaitForEarlyExitAsync(TimeSpan.FromSeconds(12)))
+            {
+                await poller.BeatAsync();
+                return true;
+            }
+
+            if (attempt == 1)
+            {
+                Append($"app: the engine exited (code {process.LastExitCode}) without serving — " +
+                       "waiting 15 s for it to settle and trying once more", LogSource.App);
+                await Task.Delay(TimeSpan.FromSeconds(15));
+                if (process.IsAlive)                        // something started meanwhile; leave it be
+                    return true;
+            }
         }
-        return ok;
+        Append($"app: the engine did not start — it exited with code {process.LastExitCode}; " +
+               "the console above shows why", LogSource.Error);
+        OnUi(() => RefreshCommands());
+        return false;
     }
 
     /// <summary>The configs started alongside the one this window watches: one process each, on its own
@@ -2091,8 +2113,12 @@ public sealed class MainViewModel : ObservableObject
         else
             await StartAsync();
         if (process.IsAlive)
+        {
             SetRunning(name, true);
-        Append($"app: config \"{name}\" loaded", LogSource.App);
+            Append($"app: config \"{name}\" loaded", LogSource.App);
+        }
+        else
+            Append($"app: config \"{name}\" did not start — the console shows why", LogSource.Error);
     }
 
     /// <summary>Makes the model named by <paramref name="frontFile"/> the first entry of

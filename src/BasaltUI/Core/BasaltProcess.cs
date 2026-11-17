@@ -381,6 +381,20 @@ public sealed class BasaltProcess : IDisposable
 
     public int? LastExitCode => exitCode;
 
+    /// <summary>True when the process ended inside the span: a start that dies at once never served,
+    /// and its exit code is the honest answer rather than a launch that looked fine.</summary>
+    public async Task<bool> WaitForEarlyExitAsync(TimeSpan span)
+    {
+        var end = DateTime.UtcNow + span;
+        while (DateTime.UtcNow < end)
+        {
+            if (!IsAlive)
+                return true;
+            await Task.Delay(250);
+        }
+        return !IsAlive;
+    }
+
     public void Dispose()
     {
         lock (gate)
