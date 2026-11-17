@@ -85,8 +85,7 @@ public partial class Dialog : Window
 
     /// <summary>A caller without a window on screen yet still has to ask something.</summary>
     private static Window? OwnerOr(Window? owner)
-        => owner ?? Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsActive)
-           ?? Application.Current?.MainWindow;
+        => owner ?? Application.Current?.Windows.OfType<Window>().FirstOrDefault(w => w.IsLoaded && w.IsVisible);
 
     private void Confirm_Click(object sender, RoutedEventArgs e)
     {

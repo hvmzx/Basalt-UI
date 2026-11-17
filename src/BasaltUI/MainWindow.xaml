@@ -412,9 +412,7 @@
                                     ToolTip="Every model on Hugging Face — the packs the basalt author publishes are pinned at the top" />
                         </DockPanel>
 
-                                   Foreground="{DynamicResource TextFaint}" Margin="0,10,0,0"
-                                   TextTrimming="CharacterEllipsis" />
-                    </Grid>
+                        </Grid>
                 </Border>
             </Grid>
         </Grid>
