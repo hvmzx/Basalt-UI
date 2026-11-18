@@ -21,28 +21,18 @@ the app itself.
 
 ## Install
 
-Download `BasaltUI.exe` from the [latest release](https://github.com/hvmzx/Basalt-UI/releases/latest)
-and run it. Everything the app keeps — settings, configs, logs — lives in `%APPDATA%\BasaltUI`, and
-basalt itself is fetched into `%APPDATA%\BasaltUI\basalt` from inside the app the first time it
-starts.
+Download `BasaltUI-<version>-setup.exe` from the
+[latest release](https://github.com/hvmzx/Basalt-UI/releases/latest) and run it. It installs per-user
+(no admin needed), adds a Start menu shortcut, and appears in Settings → Apps for uninstalling. A
+portable single-file `BasaltUI.exe` is on the release page too, if you would rather not install.
 
-Running the exe from a plain folder works, but some setups refuse the tray icon there; the safe way
-is the installed copy:
-
-```powershell
-git clone https://github.com/hvmzx/Basalt-UI.git
-cd Basalt-UI
-dotnet build src\BasaltUI\BasaltUI.csproj -c Release
-powershell -ExecutionPolicy Bypass -File install.ps1 -Launch
-```
-
-That builds the app, copies it to `%LocalAppData%\Programs\BasaltUI` and starts it there. The tray
-icon lands in the taskbar-corner overflow; drag it out once if you want it beside the clock.
+Everything the app keeps — settings, configs, logs — lives in `%APPDATA%\BasaltUI`; basalt itself is
+downloaded from inside the app the first time it starts. The tray icon lands in the taskbar-corner
+overflow; drag it out once if you want it beside the clock.
 
 ## Releases
 
-Every `v*` tag pushed builds a self-contained single-file exe and publishes it as a GitHub release.
-To cut a version:
+Every `v*` tag pushed builds both exes and publishes them as a GitHub release. To cut a version:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File release.ps1              # next patch version

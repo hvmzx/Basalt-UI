@@ -12,6 +12,12 @@ obj/
 # WPF's temporary project, left behind when a build is interrupted against a locked BasaltUI.exe.
 *_wpftmp.csproj
 
+# Release build scratch: the publish output and the installer compiled from it.
+publish/
+artifacts/
+.setup-tmp/
+.test-install/
+
 # Editor and per-user noise.
 .vs/
 *.user

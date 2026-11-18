@@ -1,4 +1,4 @@
-# Builds a release whenever a v* tag lands: one self-contained exe, published as the release's asset.
+# Builds a release whenever a v* tag lands: a portable single-file exe and a setup exe.
 name: release
 
 on:
@@ -26,7 +26,19 @@ jobs:
           $v = '${{ github.ref_name }}' -replace '^v', ''
           "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      - name: publish
+      - name: install Inno Setup if missing
+        shell: pwsh
+        run: |
+          $iscc = @(
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
+          ) | Where-Object { Test-Path $_ }
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+          }
+
+      - name: publish the single-file exe
         shell: pwsh
         run: >
           dotnet publish src/BasaltUI/BasaltUI.csproj -c Release -r win-x64
@@ -36,12 +48,18 @@ jobs:
           -p:Version=${{ steps.ver.outputs.version }}
           -o publish
 
-      - name: name the exe for the release
+      - name: compile the installer
         shell: pwsh
-        run: Move-Item publish/BasaltUI.exe "BasaltUI-${{ github.ref_name }}.exe"
+        run: ./build-installer.ps1 -Version ${{ steps.ver.outputs.version }} -SkipPublish
+
+      - name: name the portable exe for the release
+        shell: pwsh
+        run: Copy-Item publish/BasaltUI.exe "BasaltUI-${{ github.ref_name }}.exe"
 
       - name: publish the release
         uses: softprops/action-gh-release@v2
         with:
-          files: BasaltUI-${{ github.ref_name }}.exe
+          files: |
+            BasaltUI-${{ github.ref_name }}.exe
+            artifacts/BasaltUI-${{ steps.ver.outputs.version }}-setup.exe
           generate_release_notes: true

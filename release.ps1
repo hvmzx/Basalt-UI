@@ -24,7 +24,7 @@ $tag = if ($latest) {
     }
     "v$next"
 }
-else { "v1.0.0" }
+else { "v0.1.0" }
 
 git tag -a $tag -m $tag
 $branch = git rev-parse --abbrev-ref HEAD
