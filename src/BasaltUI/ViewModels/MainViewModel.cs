@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -850,6 +851,12 @@ public sealed class MainViewModel : ObservableObject
     {
         if (checkingUpdate || !Settings.CheckForUpdates)
             return;
+        // The app asks about itself on the same clock and the same switch: one quiet check per run.
+        if (!autoAppCheckDone)
+        {
+            autoAppCheckDone = true;
+            _ = CheckForAppUpdateAsync(manual: false);
+        }
         // A release that was up but had no files yet was caught mid-publish: look again in minutes, not hours
         var waiting = Latest is { Assets.Count: 0 };
         var gap = waiting ? TimeSpan.FromMinutes(10) : TimeSpan.FromHours(6);
@@ -865,6 +872,109 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>The release the user told the app to stop mentioning, if any.</summary>
     public string DismissedTag => Settings.DismissedUpdateTag;
+
+    // ---- is Basalt UI itself behind? -----------------------------------------------------------------------------
+    private AppRelease? appLatest;
+    private bool checkingAppUpdate;
+    private string appUpdateSaying = "";
+    private bool autoAppCheckDone;
+
+    /// <summary>The number stamped into this very exe by the build or the release tag.</summary>
+    public string AppVersionText => "v" + AppUpdateChecker.OwnVersion();
+
+    public AppRelease? AppLatest
+    {
+        get => appLatest;
+        private set { if (Set(ref appLatest, value)) RaiseAppUpdate(); }
+    }
+
+    public bool CheckingAppUpdate
+    {
+        get => checkingAppUpdate;
+        private set { if (Set(ref checkingAppUpdate, value)) RaiseAppUpdate(); }
+    }
+
+    public bool AppUpdateAvailable
+        => appLatest is { } release && AppUpdateChecker.Compare(AppUpdateChecker.OwnVersion(), release.Tag) > 0;
+
+    public string AppUpdateDotTip => checkingAppUpdate
+        ? "checking for a newer Basalt UI..."
+        : appUpdateSaying.Length > 0
+            ? appUpdateSaying
+            : AppUpdateAvailable
+                ? $"Basalt UI {appLatest!.Tag} is out - click to see what changed and update"
+                : $"Basalt UI {AppVersionText} is up to date - click to check again";
+
+    private void RaiseAppUpdate()
+        => RaiseAll(nameof(AppUpdateAvailable), nameof(AppUpdateDotTip), nameof(AppLatest));
+
+    /// <summary>The same question as the basalt update, asked of this app's own repository.</summary>
+    public async Task CheckForAppUpdateAsync(bool manual)
+    {
+        if (checkingAppUpdate)
+            return;
+        CheckingAppUpdate = true;
+        appUpdateSaying = "";
+        var here = AppUpdateChecker.OwnVersion();
+        try
+        {
+            var release = await AppUpdateChecker.LatestAsync(CancellationToken.None);
+            AppLatest = release;
+            var behind = AppUpdateChecker.Compare(here, release.Tag);
+            if (behind > 0)
+            {
+                Append($"basalt ui: {release.Tag} is out — this copy is v{here}", LogSource.App);
+                AppPaths.Log($"basalt ui: {release.Tag} is out, this copy is v{here}");
+                if (manual)
+                    Notice?.Invoke($"Basalt UI {release.Tag} is available");
+            }
+            else if (behind == 0 && manual)
+                Notice?.Invoke("Basalt UI v" + here + " is the newest release");
+        }
+        catch (Exception e)
+        {
+            appUpdateSaying = "the Basalt UI update check did not go: " + Net.Explain(e);
+            Append("basalt ui: " + appUpdateSaying, LogSource.Error);
+            AppPaths.Log("basalt ui: " + appUpdateSaying);
+            if (manual)
+                Notice?.Invoke(Net.Explain(e));
+        }
+        finally
+        {
+            CheckingAppUpdate = false;
+            RaiseAppUpdate();
+        }
+    }
+
+    /// <summary>The notes of every Basalt UI release between this copy and the newest, for the details window.</summary>
+    public async Task<string> AppChangelogAsync()
+    {
+        var releases = await AppUpdateChecker.ReleasesAsync(CancellationToken.None);
+        return AppUpdateChecker.Changelog(AppUpdateChecker.OwnVersion(), releases, AppLatest?.Tag ?? "newest");
+    }
+
+    /// <summary>Downloads the installer with the same resumable, hash-checked downloader basalt uses, then
+    /// stages the after-exit helper. Nothing on disk changes until this copy has closed.</summary>
+    public async Task<string?> UpdateAppAsync(IProgress<DownloadProgress>? progress)
+    {
+        if (AppLatest is not { } release)
+            return "no release was checked yet";
+        if (release.Asset is null)
+            return "this release carries no Windows exe to download";
+
+        var error = await AppUpdateInstaller.DownloadAsync(release, Settings, progress,
+            line => AppPaths.Log(line), CancellationToken.None);
+        if (error.Length > 0)
+            return error;
+
+        var current = Environment.ProcessPath ?? Assembly.GetEntryAssembly()?.Location ?? "";
+        if (current.Length == 0)
+            return "could not find this copy's exe path";
+        var helper = AppUpdateInstaller.ScheduleInstall(AppUpdateInstaller.LocalPathFor(release),
+                                                        Environment.ProcessId, current);
+        AppPaths.Log("basalt ui: update staged — " + helper);
+        return "";
+    }
 
     /// <summary>
     /// An update replaces basalt.exe, and Windows will not replace a file that is running. So the stop is part

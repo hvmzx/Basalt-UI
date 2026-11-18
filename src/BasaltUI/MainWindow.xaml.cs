@@ -351,6 +351,62 @@ public partial class MainWindow : Window
     private void IgnoreForeign_Click(object sender, RoutedEventArgs e) => Vm.IgnoreForeign();
 
 
+    // ---- Basalt UI updating itself ---------------------------------------------------------------------------------
+    private async void AppUpdateDot_Click(object sender, RoutedEventArgs e)
+    {
+        if (Vm.CheckingAppUpdate)
+            return;
+        if (Vm.AppUpdateAvailable)
+            await AskAppUpdateAsync();
+        else
+            await Vm.CheckForAppUpdateAsync(manual: true);
+    }
+
+    /// <summary>The question the version dot asks: where to, what is downloaded, and the changelog in between.
+    /// A yes stages the installer and closes this copy so it can finish after we are gone.</summary>
+    private async Task AskAppUpdateAsync()
+    {
+        var latest = Vm.AppLatest;
+        if (latest is null)
+        {
+            await Vm.CheckForAppUpdateAsync(manual: true);
+            latest = Vm.AppLatest;
+        }
+        if (latest is null || !Vm.AppUpdateAvailable)
+        {
+            Shell.Dialog.Info(this, "Basalt UI", $"This copy is up to date ({Vm.AppVersionText}).");
+            return;
+        }
+
+        var message = $"Update Basalt UI from {Vm.AppVersionText} to {latest.Tag}?\n\n" +
+                      $"{latest.AssetText}\n\n" +
+                      "The installer downloads in the background, then Basalt UI closes so it can replace " +
+                      "itself. The new version starts on its own.";
+        if (!Shell.Dialog.ConfirmWithDetails(this, "A newer Basalt UI", message,
+                                             $"Update to {latest.Tag}", "Not now", "View changelog",
+                                             () => _ = ChangelogWindow.ShowAsync(
+                                                 this, $"Changes from {Vm.AppVersionText} to {latest.Tag}",
+                                                 () => Vm.AppChangelogAsync())))
+            return;
+
+        var progress = new Progress<DownloadProgress>(p => app.Notify("basalt ui: " + p.Text));
+        UpdateButton.IsEnabled = false;
+        try
+        {
+            var error = await Vm.UpdateAppAsync(progress);
+            if (error.Length > 0)
+            {
+                Shell.Dialog.Info(this, "Basalt UI", "Could not update:\n\n" + error);
+                return;
+            }
+        }
+        finally
+        {
+            UpdateButton.IsEnabled = true;
+        }
+        app.ExitForUpdate();
+    }
+
     // ---- the version dot ---------------------------------------------------------------------------------------
     private async void UpdateDot_Click(object sender, RoutedEventArgs e)
     {

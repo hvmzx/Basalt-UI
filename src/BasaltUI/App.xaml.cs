@@ -405,6 +405,20 @@ public partial class App : Application
         _ = StopThenShutDownAsync();
     }
 
+    /// <summary>
+    /// An update has staged its installer and needs this exe gone. Same orderly stop as quitting — no second
+    /// question, the user already said yes — then the detached helper takes over once the process is gone.
+    /// </summary>
+    public void ExitForUpdate()
+    {
+        if (exiting)
+            return;
+        exiting = true;
+        tray?.Hide();
+        Poller.Stop();
+        _ = StopThenShutDownAsync();
+    }
+
     private async Task StopThenShutDownAsync()
     {
         try

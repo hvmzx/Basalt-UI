@@ -86,3 +86,26 @@ begin
   StopRunningCopy;
   Result := True;
 end;
+
+// The in-app updater launches us with /RELAUNCH once it has closed, so the new copy is
+// actually running when the update finishes instead of waiting for a Start menu click.
+function HasParam(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Code: Integer;
+begin
+  if (CurStep = ssDone) and HasParam('/RELAUNCH') then
+    Exec(ExpandConstant('{app}\{#MyAppExeName}'), '', '', SW_SHOWNORMAL, ewNoWait, Code);
+end;

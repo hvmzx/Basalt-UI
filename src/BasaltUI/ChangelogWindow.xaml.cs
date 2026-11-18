@@ -10,14 +10,19 @@ public partial class ChangelogWindow : Window
     {
         InitializeComponent();
         KeyDown += (_, e) => { if (e.Key == System.Windows.Input.Key.Escape) Close(); };
-    }    public static async Task ShowAsync(Window? owner, App app, string title)
+    }    /// <summary>The basalt changelog.</summary>
+    public static Task ShowAsync(Window? owner, App app, string title)
+        => ShowAsync(owner, title, () => app.Vm.ChangelogAsync());
+
+    /// <summary>The same window over any changelog — the app's own update uses it for its releases.</summary>
+    public static async Task ShowAsync(Window? owner, string title, Func<Task<string>> changelog)
     {
         var window = new ChangelogWindow { Owner = owner ?? Application.Current.MainWindow };
         window.Notes.ShowText(title, "reading the release notes…");
         window.Show();
         try
         {
-            var text = await app.Vm.ChangelogAsync();
+            var text = await changelog();
             window.Notes.ShowText(title, text);
         }
         catch (System.Exception e)

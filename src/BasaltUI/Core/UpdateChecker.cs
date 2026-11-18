@@ -143,11 +143,11 @@ public static class UpdateChecker
             Assets: assets);
     }
 
-    private static string Str(JsonObject o, string key) =>
+    internal static string Str(JsonObject o, string key) =>
         o[key] is JsonValue v && v.TryGetValue(out string? s) ? s : "";
 
     /// <summary>GitHub now carries an asset digest as <c>"sha256:…"</c>; older releases carry nothing.</summary>
-    private static string Digest(JsonNode? node)
+    internal static string Digest(JsonNode? node)
     {
         if (node is not JsonValue v || !v.TryGetValue(out string? text))
             return "";

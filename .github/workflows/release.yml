@@ -14,6 +14,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -56,10 +58,16 @@ jobs:
         shell: pwsh
         run: Copy-Item publish/BasaltUI.exe "BasaltUI-${{ github.ref_name }}.exe"
 
+      - name: write the changelog
+        shell: pwsh
+        run: ./changelog.ps1 -Tag ${{ github.ref_name }} -Out changelog.md
+
       - name: publish the release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             BasaltUI-${{ github.ref_name }}.exe
             artifacts/BasaltUI-${{ steps.ver.outputs.version }}-setup.exe
-          generate_release_notes: true
+          body_path: changelog.md
+          generate_release_notes: false
+          overwrite_files: true
